@@ -1,10 +1,10 @@
 # Vault Agent
 
-[English](README.en.md) · [GitHub](https://github.com/yanqingwang/obsidian-vault-agent) · [MIT License](LICENSE)
+[English](README.en.md) · [GitHub](https://github.com/yanqingwang/opensource-AI-vault-agent) · [MIT License](LICENSE)
 
 中文优先的 Obsidian vault 智能体插件——直连国产大模型 API（OpenAI 兼容协议），智能体可自主**搜索、读取、创建、修改**你的笔记。无需安装任何 CLI，无需海外账号，无需配置环境变量。
 
-**当前版本：v0.1.9**
+**当前版本：v0.1.10**
 
 ## 为什么做这个
 

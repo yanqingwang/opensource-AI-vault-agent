@@ -1,10 +1,10 @@
 # Vault Agent
 
-[中文](README.md) · [GitHub](https://github.com/yanqingwang/obsidian-vault-agent) · [MIT License](LICENSE)
+[中文](README.md) · [GitHub](https://github.com/yanqingwang/opensource-AI-vault-agent) · [MIT License](LICENSE)
 
 A China-first Obsidian agent plugin that talks directly to OpenAI-compatible LLM APIs and can autonomously **search, read, create and edit** your notes. No CLI to install, no overseas account, no environment variables to configure.
 
-**Current version: v0.1.9**
+**Current version: v0.1.10**
 
 ## Why
 

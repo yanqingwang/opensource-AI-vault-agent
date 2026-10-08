@@ -22,6 +22,8 @@ export interface HistoryMeta {
 	vault?: string;
 	provider?: string;
 	model?: string;
+	/** Name of the agent profile that produced the event (multi-agent setups). */
+	agent?: string;
 }
 
 export type HistoryEventType = 'user' | 'assistant' | 'tool_call' | 'tool_result' | 'error';

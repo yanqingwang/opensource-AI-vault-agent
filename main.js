@@ -25,7 +25,9 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 var main_exports = {};
 __export(main_exports, {
   PROVIDERS: () => PROVIDERS,
-  default: () => VaultAgentPlugin
+  applyProviderPreset: () => applyProviderPreset,
+  default: () => VaultAgentPlugin,
+  makeProfile: () => makeProfile
 });
 module.exports = __toCommonJS(main_exports);
 var import_obsidian3 = require("obsidian");
@@ -238,6 +240,272 @@ function truncate(s, n) {
 }
 function normalizeReasoning(text) {
   return text.replace(/\r\n?/g, "\n").replace(/[ \t]+/g, " ").replace(/ ?\n ?/g, "\n").replace(/^([-*_]) *(?:\1 *){2,}$/gm, "").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+// anthropic.ts
+var ANTHROPIC_VERSION = "2023-06-01";
+function toAnthropicMessages(messages) {
+  const systemParts = [];
+  const out = [];
+  for (const m of messages) {
+    if (m.role === "system") {
+      if (m.content)
+        systemParts.push(m.content);
+      continue;
+    }
+    if (m.role === "user") {
+      out.push({ role: "user", content: m.content ?? "" });
+      continue;
+    }
+    if (m.role === "assistant") {
+      const blocks = [];
+      if (m.content)
+        blocks.push({ type: "text", text: m.content });
+      for (const tc of m.tool_calls ?? []) {
+        blocks.push({ type: "tool_use", id: tc.id, name: tc.function.name, input: parseArgs(tc.function.arguments) });
+      }
+      out.push({ role: "assistant", content: blocks.length ? blocks : m.content ?? "" });
+      continue;
+    }
+    const denied = m.content === "USER_DENIED";
+    const block = {
+      type: "tool_result",
+      tool_use_id: m.tool_call_id ?? "",
+      content: m.content || "(no output)"
+    };
+    if (denied)
+      block.is_error = true;
+    const last = out[out.length - 1];
+    if (last && last.role === "user" && Array.isArray(last.content)) {
+      last.content.push(block);
+    } else {
+      out.push({ role: "user", content: [block] });
+    }
+  }
+  return { system: systemParts.join("\n\n"), messages: out };
+}
+function buildAnthropicBody(cfg, messages, tools, stream) {
+  const { system, messages: msgs } = toAnthropicMessages(messages);
+  const body = {
+    model: cfg.model,
+    max_tokens: cfg.maxTokens ?? 8192,
+    temperature: cfg.temperature ?? 0.7,
+    messages: msgs,
+    stream
+  };
+  if (system)
+    body.system = system;
+  if (tools.length) {
+    body.tools = tools.map((t2) => ({ name: t2.name, description: t2.description, input_schema: t2.parameters }));
+  }
+  return body;
+}
+async function anthropicCompletion(cfg, messages, tools, h) {
+  const url = cfg.baseUrl.replace(/\/+$/, "") + "/v1/messages";
+  const headers = {
+    "Content-Type": "application/json",
+    "x-api-key": cfg.apiKey,
+    "anthropic-version": ANTHROPIC_VERSION
+  };
+  const state = { turn: { content: null, reasoning: null, toolCalls: [] }, blocks: {}, error: null };
+  const sendStream = async () => {
+    if (!h.fetchImpl)
+      throw new Error("no streaming fetch implementation provided");
+    const res = await h.fetchImpl(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(buildAnthropicBody(cfg, messages, tools, true)),
+      signal: h.signal
+    });
+    if (!res.ok) {
+      const errText = await res.text().catch(() => "");
+      throw new Error(`HTTP ${res.status}: ${truncate(errText, 500)}`);
+    }
+    if (!res.body)
+      throw new Error("empty response body");
+    await consumeSse(res.body, (data) => applyAnthropicChunk(data, state, h));
+    if (state.error)
+      throw new Error(state.error);
+  };
+  try {
+    await sendStream();
+  } catch (e) {
+    if (h.fallbackPost && !h.signal?.aborted) {
+      state.turn = { content: null, reasoning: null, toolCalls: [] };
+      state.blocks = {};
+      state.error = null;
+      const out = await h.fallbackPost(url, headers, JSON.stringify(buildAnthropicBody(cfg, messages, tools, false)));
+      if (out.status >= 400)
+        throw new Error(`HTTP ${out.status}: ${truncate(out.body, 500)}`);
+      applyNonStreamingMessage(out.body || "{}", state, h);
+    } else {
+      throw e;
+    }
+  }
+  finalizeToolCalls(state);
+  return state.turn;
+}
+function applyAnthropicChunk(payload, state, h) {
+  if (!payload)
+    return;
+  let parsed;
+  try {
+    parsed = JSON.parse(payload);
+  } catch {
+    return;
+  }
+  const data = asRecord2(parsed);
+  if (!data)
+    return;
+  const index = typeof data.index === "number" ? data.index : 0;
+  switch (asString(data.type)) {
+    case "content_block_start": {
+      const block = asRecord2(data.content_block) ?? {};
+      const type = asString(block.type);
+      state.blocks[index] = {
+        type: type === "tool_use" ? "tool_use" : type === "thinking" ? "thinking" : "text",
+        id: asString(block.id),
+        name: asString(block.name),
+        argsJson: ""
+      };
+      break;
+    }
+    case "content_block_delta": {
+      const delta = asRecord2(data.delta);
+      if (!delta)
+        break;
+      const kind = asString(delta.type);
+      if (kind === "text_delta") {
+        const text = asString(delta.text);
+        if (text) {
+          state.turn.content = (state.turn.content ?? "") + text;
+          h.onText?.(text);
+        }
+      } else if (kind === "thinking_delta") {
+        const thinking = asString(delta.thinking);
+        if (thinking) {
+          state.turn.reasoning = (state.turn.reasoning ?? "") + thinking;
+          h.onReasoning?.(thinking);
+        }
+      } else if (kind === "input_json_delta") {
+        const block = state.blocks[index];
+        if (block)
+          block.argsJson += asString(delta.partial_json);
+      }
+      break;
+    }
+    case "message_delta": {
+      break;
+    }
+    case "error": {
+      const err = asRecord2(data.error);
+      state.error = (err ? asString(err.message) : "") || "stream error";
+      break;
+    }
+    default:
+      break;
+  }
+}
+function applyNonStreamingMessage(body, state, h) {
+  let parsed;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    throw new Error("non-JSON response from provider");
+  }
+  const data = asRecord2(parsed);
+  if (!data)
+    throw new Error("unparsable response from provider");
+  const err = asRecord2(data.error);
+  if (err)
+    throw new Error(asString(err.message) || "provider error");
+  const content = Array.isArray(data.content) ? data.content : [];
+  content.forEach((raw, i) => {
+    const block = asRecord2(raw);
+    if (!block)
+      return;
+    const type = asString(block.type);
+    if (type === "text") {
+      const text = asString(block.text);
+      state.turn.content = (state.turn.content ?? "") + text;
+      h.onText?.(text);
+    } else if (type === "thinking") {
+      const thinking = asString(block.thinking);
+      state.turn.reasoning = (state.turn.reasoning ?? "") + thinking;
+      h.onReasoning?.(thinking);
+    } else if (type === "tool_use") {
+      state.blocks[i] = {
+        type: "tool_use",
+        id: asString(block.id),
+        name: asString(block.name),
+        argsJson: JSON.stringify(block.input ?? {})
+      };
+    }
+  });
+}
+function finalizeToolCalls(state) {
+  state.turn.toolCalls = Object.keys(state.blocks).map(Number).sort((a, b) => a - b).map((i) => state.blocks[i]).filter((b) => b.type === "tool_use").map((b) => ({
+    id: b.id,
+    type: "function",
+    function: { name: b.name, arguments: b.argsJson || "{}" }
+  }));
+}
+async function runAnthropicLoop(opts) {
+  const maxIter = opts.maxIterations ?? 12;
+  let hitCap = false;
+  let reasoning = "";
+  for (let i = 0; i < maxIter; i++) {
+    const turn = await anthropicCompletion(opts, opts.messages, opts.tools, {
+      onText: opts.onText,
+      onReasoning: opts.onReasoning,
+      signal: opts.signal,
+      fetchImpl: opts.fetchImpl,
+      fallbackPost: opts.fallbackPost
+    });
+    if (turn.reasoning)
+      reasoning += (reasoning ? "\n" : "") + turn.reasoning;
+    const calls = turn.toolCalls.filter(Boolean);
+    if (!calls.length) {
+      return { text: turn.content ?? "", reasoning, hitCap: false };
+    }
+    opts.messages.push({ role: "assistant", content: turn.content ?? null, tool_calls: calls });
+    for (const call of calls) {
+      opts.onToolStart?.(call);
+      let result = { ok: false, content: "blocked before execution" };
+      try {
+        const args = JSON.parse(call.function.arguments || "{}");
+        const def = opts.tools.find((t2) => t2.name === call.function.name);
+        if (def?.x_write && opts.confirmWrite && !await opts.confirmWrite(`${call.function.name}: ${truncate(JSON.stringify(args), 200)}`)) {
+          result = { ok: false, content: "USER_DENIED" };
+        } else {
+          result = await opts.executor.execute(call.function.name, call.function.arguments);
+        }
+      } catch (e) {
+        result = { ok: false, content: "tool error: " + (e instanceof Error ? e.message : String(e)) };
+      }
+      opts.onToolDone?.(call, result);
+      opts.messages.push({
+        role: "tool",
+        tool_call_id: call.id,
+        content: truncate(result.content, 2e4)
+      });
+    }
+    hitCap = true;
+  }
+  return { text: "", reasoning: "", hitCap };
+}
+function parseArgs(json) {
+  try {
+    return JSON.parse(json || "{}");
+  } catch {
+    return {};
+  }
+}
+function asRecord2(value) {
+  return value !== null && typeof value === "object" ? value : null;
+}
+function asString(value) {
+  return typeof value === "string" ? value : "";
 }
 
 // proxyFetch.ts
@@ -651,7 +919,7 @@ function buildTavilyBody(query, s, overrideResults) {
   };
 }
 function formatTavilyResults(parsed) {
-  const data = asRecord2(parsed);
+  const data = asRecord3(parsed);
   if (!data)
     return { ok: false, content: "web search failed: unparsable response" };
   const error = errorMessage(data);
@@ -661,13 +929,13 @@ function formatTavilyResults(parsed) {
   if (!results.length)
     return { ok: true, content: "(no results)" };
   const blocks = results.map((raw, i) => {
-    const item = asRecord2(raw) ?? {};
-    const title = asString(item.title) || "(untitled)";
-    const link = asString(item.url);
-    const excerpt2 = oneLine(asString(item.content)).slice(0, 600);
+    const item = asRecord3(raw) ?? {};
+    const title = asString2(item.title) || "(untitled)";
+    const link = asString2(item.url);
+    const excerpt2 = oneLine(asString2(item.content)).slice(0, 600);
     return [`${i + 1}. ${title}`, link ? `   ${link}` : "", excerpt2 ? `   ${excerpt2}` : ""].filter(Boolean).join("\n");
   });
-  const answer = oneLine(asString(data.answer));
+  const answer = oneLine(asString2(data.answer));
   return { ok: true, content: (answer ? `answer: ${answer}
 
 ` : "") + blocks.join("\n") };
@@ -683,11 +951,11 @@ function createWebSearchExecutor(post, getSettings) {
         return { ok: false, content: "web search is not configured: add a Tavily API key in the plugin settings" };
       let args;
       try {
-        args = asRecord2(JSON.parse(argsJson || "{}")) ?? {};
+        args = asRecord3(JSON.parse(argsJson || "{}")) ?? {};
       } catch {
         return { ok: false, content: "invalid JSON arguments" };
       }
-      const query = asString(args.query).trim();
+      const query = asString2(args.query).trim();
       if (!query)
         return { ok: false, content: "web search needs a non-empty query" };
       const override = typeof args.max_results === "number" ? args.max_results : void 0;
@@ -718,10 +986,10 @@ function clampResults(n) {
     return 5;
   return Math.min(20, Math.max(1, Math.round(n)));
 }
-function asRecord2(value) {
+function asRecord3(value) {
   return value !== null && typeof value === "object" ? value : null;
 }
-function asString(value) {
+function asString2(value) {
   return typeof value === "string" ? value : "";
 }
 function oneLine(text) {
@@ -745,7 +1013,7 @@ function withTimeout(promise, ms, label) {
 function errorMessage(data) {
   if (typeof data.error === "string")
     return data.error;
-  const detail = asRecord2(data.detail);
+  const detail = asRecord3(data.detail);
   if (detail && typeof detail.error === "string")
     return detail.error;
   return "";
@@ -759,7 +1027,27 @@ var zh = {
   stop: "\u505C\u6B62",
   send: "\u53D1\u9001",
   inputPlaceholder: "\u5411\u667A\u80FD\u4F53\u63D0\u95EE\uFF0C\u6216\u8BA9\u5B83\u64CD\u4F5C\u4F60\u7684\u7B14\u8BB0\u2026\uFF08Enter \u53D1\u9001\uFF0CShift+Enter \u6362\u884C\uFF09",
-  welcome: "\u6211\u662F\u4F60\u7684 vault \u667A\u80FD\u4F53\u3002\u53EF\u4EE5\u76F4\u63A5\u95EE\u6211\u95EE\u9898\uFF0C\u4E5F\u53EF\u4EE5\u8BA9\u6211**\u641C\u7D22\u3001\u521B\u5EFA\u3001\u4FEE\u6539**\u7B14\u8BB0\u3002\n\n\u5F00\u59CB\u524D\u8BF7\u5728\u8BBE\u7F6E\u4E2D\u586B\u5165\u6A21\u578B\u670D\u52A1\u5546\u7684 API Key\uFF08\u652F\u6301 DeepSeek / \u667A\u8C31 GLM / Kimi / \u901A\u4E49 Qwen / \u706B\u5C71\u65B9\u821F / \u817E\u8BAF\u6DF7\u5143 / Hermes(Nous) / OpenRouter \u6216\u4EFB\u610F OpenAI \u517C\u5BB9\u7AEF\u70B9\uFF09\u3002",
+  welcome: "\u6211\u662F\u4F60\u7684 vault \u667A\u80FD\u4F53\u3002\u53EF\u4EE5\u76F4\u63A5\u95EE\u6211\u95EE\u9898\uFF0C\u4E5F\u53EF\u4EE5\u8BA9\u6211**\u641C\u7D22\u3001\u521B\u5EFA\u3001\u4FEE\u6539**\u7B14\u8BB0\u3002\n\n\u5F00\u59CB\u524D\u8BF7\u5728\u8BBE\u7F6E\u4E2D\u586B\u5165\u6A21\u578B\u670D\u52A1\u5546\u7684 API Key\uFF08\u652F\u6301 DeepSeek / \u667A\u8C31 GLM / Kimi / \u901A\u4E49 Qwen / \u706B\u5C71\u65B9\u821F / \u817E\u8BAF\u6DF7\u5143 / Hermes(Nous) / OpenRouter \u6216\u4EFB\u610F OpenAI \u517C\u5BB9\u7AEF\u70B9\uFF09\u3002\n\n\u652F\u6301\u914D\u7F6E**\u591A\u4E2A Agent**\uFF08\u5982\u706B\u5C71\u65B9\u821F Coding Plan \u7684\u8C46\u5305\u7F16\u7A0B\u6A21\u578B\uFF09\uFF0C\u70B9\u6807\u9898\u680F\u5373\u53EF\u5FEB\u901F\u5207\u6362\uFF1B\u6240\u6709 Agent \u5171\u4EAB\u5F53\u524D\u5BF9\u8BDD\u3002",
+  agentsHeading: "\u667A\u80FD\u4F53 (Agents)",
+  agentsHeadingDesc: "\u6BCF\u4E2A Agent \u4FDD\u5B58\u5404\u81EA\u7684\u670D\u52A1\u5546\u3001Key \u4E0E\u63D0\u793A\u8BCD\uFF1B\u5BF9\u8BDD\u5168\u5C40\u5171\u4EAB\uFF0C\u5207\u6362 Agent \u4E0D\u6362\u4E0A\u4E0B\u6587\u3002",
+  newAgent: "\u65B0\u5EFA\u7A7A\u767D Agent",
+  codingPlanTemplate: "\u7528\u706B\u5C71 Coding Plan \u6A21\u677F\u65B0\u5EFA",
+  defaultAgentName: "\u9ED8\u8BA4 Agent",
+  codingAgentName: "\u706B\u5C71 Coding Plan",
+  newAgentName: "\u65B0 Agent",
+  duplicateAgent: "\u590D\u5236",
+  deleteAgent: "\u5220\u9664",
+  renameAgent: "\u91CD\u547D\u540D",
+  agentName: "Agent \u540D\u79F0",
+  switchAgent: "\u5207\u6362\u667A\u80FD\u4F53",
+  switchAgentDesc: "\u5728\u5DF2\u914D\u7F6E\u7684\u591A\u4E2A Agent \u95F4\u5FEB\u901F\u5207\u6362\uFF0C\u5F53\u524D\u5BF9\u8BDD\u4FDD\u6301\u4E0D\u53D8\u3002",
+  editingAgent: "\u5F53\u524D Agent \u914D\u7F6E",
+  confirmDeleteAgent: "\u786E\u5B9A\u5220\u9664\u8BE5 Agent\uFF1F\u6B64\u64CD\u4F5C\u4E0D\u53EF\u64A4\u9500\u3002",
+  agentActiveBadge: "\u5F53\u524D",
+  deleteLastAgent: "\u81F3\u5C11\u9700\u8981\u4FDD\u7559\u4E00\u4E2A Agent\u3002",
+  switchedAgent: "\u5DF2\u5207\u6362\u5230\uFF1A",
+  agentCreated: "\u5DF2\u65B0\u5EFA Agent\uFF0C\u8BB0\u5F97\u586B\u540D\u79F0\u548C API Key\u3002",
+  providerProtocolHint: "\u8BE5\u670D\u52A1\u5546\u4F7F\u7528 Anthropic Messages \u534F\u8BAE\uFF08/v1/messages\uFF09\u3002",
   needApiKey: "\u8BF7\u5148\u5728\u8BBE\u7F6E\u4E2D\u586B\u5199 API Key\u3002",
   noActiveNote: "\uFF08\u65E0\u6D3B\u52A8\u7B14\u8BB0\uFF09",
   toolCall: "\u5DE5\u5177\u8C03\u7528",
@@ -830,7 +1118,27 @@ var en = {
   stop: "Stop",
   send: "Send",
   inputPlaceholder: "Ask the agent, or have it work on your notes\u2026 (Enter to send, Shift+Enter for newline)",
-  welcome: "I'm your vault agent. Ask me anything, or have me **search, create, and edit** notes.\n\nPick a provider and paste an API key in settings (DeepSeek / GLM / Kimi / Qwen / Volcengine Ark / Tencent Hunyuan / Hermes(Nous) / OpenRouter / any OpenAI-compatible endpoint).",
+  welcome: "I'm your vault agent. Ask me anything, or have me **search, create, and edit** notes.\n\nPick a provider and paste an API key in settings (DeepSeek / GLM / Kimi / Qwen / Volcengine Ark / Tencent Hunyuan / Hermes(Nous) / OpenRouter / any OpenAI-compatible endpoint).\n\nYou can configure **multiple agents** (e.g. the Doubao coding model via Volcengine Coding Plan) and switch instantly from the header; the conversation is shared.",
+  agentsHeading: "Agents",
+  agentsHeadingDesc: "Each agent keeps its own provider, key and prompts; the conversation is shared, so switching keeps the context.",
+  newAgent: "New blank agent",
+  codingPlanTemplate: "New from Volcengine Coding Plan template",
+  defaultAgentName: "Default agent",
+  codingAgentName: "Volcengine Coding Plan",
+  newAgentName: "New agent",
+  duplicateAgent: "Duplicate",
+  deleteAgent: "Delete",
+  renameAgent: "Rename",
+  agentName: "Agent name",
+  switchAgent: "Switch agent",
+  switchAgentDesc: "Quickly switch between configured agents; the current conversation is kept.",
+  editingAgent: "Current agent settings",
+  confirmDeleteAgent: "Delete this agent? This cannot be undone.",
+  agentActiveBadge: "active",
+  deleteLastAgent: "At least one agent must remain.",
+  switchedAgent: "Switched to: ",
+  agentCreated: "New agent created \u2014 set a name and API key.",
+  providerProtocolHint: "This provider uses the Anthropic Messages protocol (/v1/messages).",
   needApiKey: "Please set an API key in settings first.",
   noActiveNote: "(no active note)",
   toolCall: "Tool call",
@@ -1202,6 +1510,8 @@ var AgentView = class extends import_obsidian2.ItemView {
     this.messages = [];
     this.running = false;
     this.abort = null;
+    this.brandEl = null;
+    this.switchBtn = null;
     /** Raw history.jsonl, cached while the history panel is open. */
     this.historyText = "";
     this.historyQuery = "";
@@ -1210,10 +1520,10 @@ var AgentView = class extends import_obsidian2.ItemView {
     return VIEW_TYPE_AGENT;
   }
   getDisplayText() {
-    return t(this.plugin.settings.lang, "viewName");
+    return t(this.plugin.lang, "viewName");
   }
   getIcon() {
-    return t(this.plugin.settings.lang, "viewIcon");
+    return t(this.plugin.lang, "viewIcon");
   }
   async onOpen() {
     this.messages = this.plugin.loadHistory();
@@ -1238,7 +1548,19 @@ var AgentView = class extends import_obsidian2.ItemView {
     this.abort?.abort();
   }
   st(key) {
-    return t(this.plugin.settings.lang, key);
+    return t(this.plugin.lang, key);
+  }
+  /** Header label: the active agent's name plus the model it will call. */
+  brandLabel() {
+    return this.plugin.profile.name + " \xB7 " + this.plugin.currentModelLabel();
+  }
+  /** Anchor for the agent-switcher menu when opened from the command palette. */
+  getSwitcherAnchor() {
+    return this.switchBtn ?? null;
+  }
+  /** The active agent changed (from the header menu or the settings tab). */
+  onProfileSwitched() {
+    this.brandEl?.setText(this.brandLabel());
   }
   renderShell() {
     const root = this.contentEl;
@@ -1247,8 +1569,11 @@ var AgentView = class extends import_obsidian2.ItemView {
     const header = root.createDiv({ cls: "va-header" });
     const brand = header.createDiv({ cls: "va-brand" });
     (0, import_obsidian2.setIcon)(brand, "bot-message-square");
-    brand.createSpan({ text: this.st("viewName") + " \xB7 " + this.plugin.currentModelLabel() });
+    this.brandEl = brand.createSpan({ text: this.brandLabel() });
     const actions = header.createDiv({ cls: "va-header-actions" });
+    this.switchBtn = actions.createEl("button", { cls: "va-icon-btn", attr: { "aria-label": this.st("switchAgent"), title: this.st("switchAgent") } });
+    (0, import_obsidian2.setIcon)(this.switchBtn, "chevrons-up-down");
+    this.switchBtn.addEventListener("click", (e) => this.plugin.openAgentSwitcher(e));
     const historyBtn = actions.createEl("button", { cls: "va-icon-btn", attr: { "aria-label": this.st("history") } });
     (0, import_obsidian2.setIcon)(historyBtn, "history");
     historyBtn.addEventListener("click", () => void this.openHistory());
@@ -1519,9 +1844,9 @@ var AgentView = class extends import_obsidian2.ItemView {
       pre.textContent = result.content.slice(0, 2e3);
   }
   buildSystemPrompt() {
-    const s = this.plugin.settings;
+    const s = this.plugin.profile;
     const active = this.app.workspace.getActiveFile();
-    const zhMode = s.lang === "zh";
+    const zhMode = this.plugin.lang === "zh";
     const base = s.systemPrompt.trim() || (zhMode ? `\u4F60\u662F Obsidian \u5E93\uFF08vault\uFF09\u5185\u7684\u667A\u80FD\u4F53\u52A9\u624B\uFF0C\u53EF\u4EE5\u501F\u52A9\u5DE5\u5177\u8BFB\u5199\u548C\u68C0\u7D22\u7528\u6237\u7684\u7B14\u8BB0\u3002\u89C4\u5219\uFF1A
 - \u6D89\u53CA\u7B14\u8BB0\u5185\u5BB9\u65F6\u4F18\u5148\u4F7F\u7528\u5DE5\u5177\uFF08search_notes/read_note/list_notes\uFF09\u83B7\u53D6\u771F\u5B9E\u5185\u5BB9\uFF0C\u4E0D\u8981\u51ED\u7A7A\u7F16\u9020\u7B14\u8BB0\u5185\u5BB9\u3002
 - \u7F16\u8F91\u7B14\u8BB0\u7528 edit_note\uFF0Cold_string \u5FC5\u987B\u4E0E\u539F\u6587\u5B8C\u5168\u4E00\u81F4\u4E14\u552F\u4E00\uFF1B\u65B0\u5EFA\u7528 create_note\uFF1B\u8FFD\u52A0\u7528 append_note\u3002
@@ -1547,7 +1872,7 @@ var AgentView = class extends import_obsidian2.ItemView {
   }
   /** Current web-search configuration, as the pure `search.ts` helpers expect it. */
   searchSettings() {
-    const s = this.plugin.settings;
+    const s = this.plugin.profile;
     return {
       mode: s.searchMode,
       providerId: s.providerId,
@@ -1557,7 +1882,7 @@ var AgentView = class extends import_obsidian2.ItemView {
     };
   }
   confirmWrite(summary) {
-    const s = this.plugin.settings;
+    const s = this.plugin.profile;
     if (s.autoApprove)
       return Promise.resolve(true);
     return new Promise((resolve) => {
@@ -1578,7 +1903,7 @@ var AgentView = class extends import_obsidian2.ItemView {
   async send() {
     if (this.running)
       return;
-    const s = this.plugin.settings;
+    const s = this.plugin.profile;
     if (!s.apiKey.trim()) {
       new import_obsidian2.Notice(this.st("needApiKey"));
       this.plugin.openSettings();
@@ -1621,7 +1946,7 @@ var AgentView = class extends import_obsidian2.ItemView {
     const chipQueue = [];
     const toolStartedAt = /* @__PURE__ */ new Map();
     try {
-      const { text, reasoning, hitCap } = await runAgentLoop({
+      const base = {
         baseUrl: s.baseUrl,
         apiKey: s.apiKey,
         model: s.model,
@@ -1631,9 +1956,6 @@ var AgentView = class extends import_obsidian2.ItemView {
         messages: this.messages,
         tools,
         executor,
-        nativeSearch: search.native ?? void 0,
-        passthroughTools: search.native?.passthrough,
-        onSearchFallback: () => new import_obsidian2.Notice(this.st("searchFallback")),
         signal: this.abort.signal,
         confirmWrite: (summary) => this.confirmWrite(summary),
         fetchImpl,
@@ -1651,6 +1973,12 @@ var AgentView = class extends import_obsidian2.ItemView {
           if (chip)
             this.completeToolChip(chip, result);
         }
+      };
+      const { text, reasoning, hitCap } = s.protocol === "anthropic" ? await runAnthropicLoop(base) : await runAgentLoop({
+        ...base,
+        nativeSearch: search.native ?? void 0,
+        passthroughTools: search.native?.passthrough,
+        onSearchFallback: () => new import_obsidian2.Notice(this.st("searchFallback"))
       });
       const reply = text.trim() ? text : hitCap ? this.st("maxIterNoAnswer") : this.st("emptyReply");
       stream.finish(reply, reasoning);
@@ -1660,7 +1988,7 @@ var AgentView = class extends import_obsidian2.ItemView {
       history.assistant(reply, reasoning);
     } catch (e) {
       const aborted = this.abort.signal.aborted;
-      const msg = aborted ? s.lang === "zh" ? "\uFF08\u5DF2\u505C\u6B62\uFF09" : "(stopped)" : `${this.st("errPrefix")}: ${e instanceof Error ? e.message : String(e)}`;
+      const msg = aborted ? this.plugin.lang === "zh" ? "\uFF08\u5DF2\u505C\u6B62\uFF09" : "(stopped)" : `${this.st("errPrefix")}: ${e instanceof Error ? e.message : String(e)}`;
       stream.finish(msg, "");
       this.messages.push({ role: "assistant", content: msg });
       history.error(msg);
@@ -1690,12 +2018,29 @@ var PROVIDERS = [
   { id: "kimi", label: "Kimi (Moonshot \u6708\u4E4B\u6697\u9762)", baseUrl: "https://api.moonshot.cn/v1", models: ["kimi-k2-turbo-preview", "kimi-k2-preview", "moonshot-v1-32k"], hint: "K \u7CFB\u5217\u6A21\u578B ID \u4EE5 platform.moonshot.cn \u4E3A\u51C6" },
   { id: "qwen", label: "\u901A\u4E49 Qwen (DashScope \xB7 Qoder \u540C\u6E90)", baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1", models: ["qwen3-coder-plus", "qwen-plus", "qwen-max"] },
   { id: "ark", label: "\u706B\u5C71\u65B9\u821F Ark (\u8C46\u5305 \xB7 Trae \u540C\u6E90)", baseUrl: "https://ark.cn-beijing.volces.com/api/v3", models: ["doubao-seed-1-6-250615"], hint: "\u65B9\u821F\u9700\u586B\u63A8\u7406\u63A5\u5165\u70B9 ID\uFF08ep-xxx\uFF09\u6216\u6A21\u578B ID\uFF0C\u4EE5\u706B\u5C71\u63A7\u5236\u53F0\u4E3A\u51C6" },
+  {
+    id: "ark-coding",
+    label: "\u706B\u5C71\u65B9\u821F Coding Plan (Anthropic \u534F\u8BAE)",
+    baseUrl: "https://ark.cn-beijing.volces.com/api/coding",
+    models: ["doubao-seed-code-preview-latest", "doubao-seed-code-preview-251028"],
+    protocol: "anthropic",
+    hint: "\u9700\u5148\u5728\u706B\u5C71\u65B9\u821F\u63A7\u5236\u53F0\u8D2D\u4E70 Coding Plan\uFF0C\u5E76\u4F7F\u7528\u5957\u9910\u4E13\u5C5E API Key\uFF08\u4E0E\u901A\u7528\u65B9\u821F Key \u4E0D\u4E92\u901A\uFF09\u3002\u8FD9\u662F Claude Code \u540C\u6B3E\u7684 Anthropic Messages \u5165\u53E3\uFF08POST /api/coding/v1/messages\uFF09\u3002\u6A21\u578B ID \u4EE5\u63A7\u5236\u53F0\u4E3A\u51C6\u3002"
+  },
+  {
+    id: "ark-coding-openai",
+    label: "\u706B\u5C71\u65B9\u821F Coding Plan (OpenAI \u517C\u5BB9)",
+    baseUrl: "https://ark.cn-beijing.volces.com/api/coding/v3",
+    models: ["doubao-seed-code-preview-latest", "doubao-seed-2.1-pro"],
+    hint: "\u540C\u4E00 Coding Plan \u7684 OpenAI \u517C\u5BB9\u5165\u53E3\uFF08POST /api/coding/v3/chat/completions\uFF09\u3002\u82E5 Anthropic \u5165\u53E3\u5728\u4F60\u7684\u5957\u9910\u4E0B\u4E0D\u53EF\u7528\uFF0C\u6539\u7528\u8FD9\u4E2A\u3002\u6A21\u578B ID \u4EE5\u63A7\u5236\u53F0\u4E3A\u51C6\u3002"
+  },
   { id: "hunyuan", label: "\u817E\u8BAF\u6DF7\u5143 Hunyuan (WorkBuddy \u540C\u6E90)", baseUrl: "https://api.hunyuan.cloud.tencent.com/v1", models: ["hunyuan-turbos-latest", "hunyuan-t1-latest"] },
   { id: "hermes", label: "Hermes (Nous Research)", baseUrl: "https://inference-api.nousresearch.com/v1", models: ["Hermes-4-405B", "Hermes-4-70B"], hint: "\u4E5F\u53EF\u7528 OpenRouter \u8F6C\u53D1\uFF08\u9009 OpenRouter \u5E76\u586B nousresearch/hermes-4-405b\uFF09" },
   { id: "openrouter", label: "OpenRouter", baseUrl: "https://openrouter.ai/api/v1", models: ["nousresearch/hermes-4-405b", "deepseek/deepseek-chat-v3.1"] },
+  { id: "anthropic-custom", label: "\u81EA\u5B9A\u4E49 Anthropic \u517C\u5BB9\u7AEF\u70B9", baseUrl: "", models: [], protocol: "anthropic", hint: "\u586B\u5199 Anthropic Messages \u534F\u8BAE\uFF08POST /v1/messages\uFF09\u7684 Base URL \u4E0E\u6A21\u578B ID\u3002" },
   { id: "custom", label: "\u81EA\u5B9A\u4E49 OpenAI \u517C\u5BB9\u7AEF\u70B9", baseUrl: "", models: [], hint: "\u586B\u5199\u4EFB\u610F OpenAI \u517C\u5BB9 Base URL \u4E0E\u6A21\u578B ID" }
 ];
-var DEFAULT_SETTINGS = {
+var PROFILE_DEFAULTS = {
+  protocol: "openai",
   providerId: "deepseek",
   baseUrl: "https://api.deepseek.com/v1",
   apiKey: "",
@@ -1707,26 +2052,59 @@ var DEFAULT_SETTINGS = {
   autoContext: true,
   autoApprove: false,
   systemPrompt: "",
-  lang: "zh",
-  history: [],
-  sessionId: "",
   searchMode: "off",
   searchApiKey: "",
   searchMaxResults: 5,
   searchDepth: "basic"
 };
+function newProfileId() {
+  return "agent-" + newSessionId();
+}
+function makeProfile(name, presetId) {
+  const preset = presetId ? PROVIDERS.find((p) => p.id === presetId) : void 0;
+  const profile = { id: newProfileId(), name, ...PROFILE_DEFAULTS };
+  if (preset)
+    applyProviderPreset(profile, preset.id);
+  return profile;
+}
+function applyProviderPreset(profile, providerId) {
+  const preset = PROVIDERS.find((p) => p.id === providerId);
+  if (!preset)
+    return;
+  profile.protocol = preset.protocol ?? "openai";
+  profile.baseUrl = preset.baseUrl;
+  if (preset.models.length)
+    profile.model = preset.models[0];
+}
+function defaultSettings() {
+  const profile = makeProfile("\u9ED8\u8BA4 Agent");
+  return { lang: "zh", profiles: [profile], activeProfileId: profile.id, history: [], sessionId: "" };
+}
 var VaultAgentPlugin = class extends import_obsidian3.Plugin {
   constructor() {
     super(...arguments);
-    this.settings = DEFAULT_SETTINGS;
+    this.settings = defaultSettings();
     this.recorder = null;
+    this.settingTab = null;
+    /** Set once settings have been read successfully; guards against clobbering data.json. */
+    this.loaded = false;
+  }
+  /** The agent profile currently in use. */
+  get profile() {
+    const s = this.settings;
+    return s.profiles.find((p) => p.id === s.activeProfileId) ?? s.profiles[0];
+  }
+  get lang() {
+    return this.settings.lang;
   }
   async onload() {
     await this.loadSettings();
     this.registerView(VIEW_TYPE_AGENT, (leaf) => new AgentView(leaf, this));
     this.addRibbonIcon("bot-message-square", t(this.settings.lang, "viewName"), () => void this.revealAgent());
     this.addCommand({ id: "open-agent", name: "\u6253\u5F00\u667A\u80FD\u4F53 / open agent", callback: () => void this.revealAgent() });
-    this.addSettingTab(new VASettingTab(this.app, this));
+    this.addCommand({ id: "switch-agent", name: "\u5207\u6362\u667A\u80FD\u4F53 / switch agent", callback: () => this.openAgentSwitcher() });
+    this.settingTab = new VASettingTab(this.app, this);
+    this.addSettingTab(this.settingTab);
   }
   onunload() {
   }
@@ -1747,7 +2125,81 @@ var VaultAgentPlugin = class extends import_obsidian3.Plugin {
     setting.openTabById(this.manifest.id);
   }
   currentModelLabel() {
-    return this.settings.model || this.settings.baseUrl || "not configured";
+    const p = this.profile;
+    return p.model || p.baseUrl || "not configured";
+  }
+  // ---------------------------------------------------------------- agents
+  /** Create a profile (optionally from a provider preset) and make it active. */
+  createProfile(name, presetId) {
+    const profile = makeProfile(name ?? t(this.settings.lang, "newAgentName"), presetId);
+    this.settings.profiles.push(profile);
+    this.settings.activeProfileId = profile.id;
+    void this.saveSettings();
+    return profile;
+  }
+  /** Copy a profile (keys and all) under a new id, so it can be tweaked separately. */
+  duplicateProfile(id) {
+    const src = this.settings.profiles.find((p) => p.id === id);
+    if (!src)
+      return null;
+    const copy = { ...src, id: newProfileId(), name: src.name + " copy" };
+    this.settings.profiles.push(copy);
+    this.settings.activeProfileId = copy.id;
+    void this.saveSettings();
+    return copy;
+  }
+  /** Remove a profile; the last one cannot be deleted. */
+  deleteProfile(id) {
+    const s = this.settings;
+    if (s.profiles.length <= 1)
+      return false;
+    const idx = s.profiles.findIndex((p) => p.id === id);
+    if (idx < 0)
+      return false;
+    s.profiles.splice(idx, 1);
+    if (s.activeProfileId === id)
+      s.activeProfileId = s.profiles[0].id;
+    void this.saveSettings();
+    return true;
+  }
+  /**
+   * Switch the active agent. The conversation is shared, so history, session id
+   * and the recorder are left untouched: the next turn simply goes to the new
+   * provider. Only the view header (and an open settings tab) needs refreshing.
+   */
+  switchProfile(id) {
+    const s = this.settings;
+    if (s.activeProfileId === id || !s.profiles.some((p) => p.id === id))
+      return false;
+    s.activeProfileId = id;
+    void this.saveSettings();
+    for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_AGENT)) {
+      if (leaf.view instanceof AgentView)
+        leaf.view.onProfileSwitched();
+    }
+    this.notifySettingsChanged();
+    return true;
+  }
+  /** Menu of configured agents, anchored to the click or to the view's switcher button. */
+  openAgentSwitcher(evt) {
+    const s = this.settings;
+    const menu = new import_obsidian3.Menu();
+    for (const p of s.profiles) {
+      menu.addItem((item) => item.setTitle(p.name + (p.model ? " \xB7 " + p.model : "")).setChecked(p.id === s.activeProfileId).onClick(() => this.switchProfile(p.id)));
+    }
+    menu.addSeparator();
+    menu.addItem((item) => item.setTitle(t(s.lang, "openSettings")).setIcon("settings").onClick(() => this.openSettings()));
+    if (evt) {
+      menu.showAtMouseEvent(evt);
+      return;
+    }
+    const leaf = this.app.workspace.getLeavesOfType(VIEW_TYPE_AGENT)[0];
+    const anchor = leaf?.view instanceof AgentView ? leaf.view.getSwitcherAnchor() : null;
+    const rect = anchor?.getBoundingClientRect();
+    menu.showAtPosition({ x: rect ? rect.left : 40, y: rect ? rect.bottom + 4 : 80 });
+  }
+  notifySettingsChanged() {
+    this.settingTab?.refresh();
   }
   /** Non-streaming fallback used when direct fetch streaming fails (e.g. CORS). */
   /**
@@ -1763,13 +2215,67 @@ var VaultAgentPlugin = class extends import_obsidian3.Plugin {
     );
     return { status: res.status, body: res.text };
   }
+  // -------------------------------------------------------------- settings
   async loadSettings() {
-    const data = await this.loadData();
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, data ?? {});
+    this.settings = defaultSettings();
+    let migrated = false;
+    try {
+      const data = await this.loadData();
+      if (data && Array.isArray(data.profiles) && data.profiles.length) {
+        const profiles = data.profiles.map((p) => ({ ...PROFILE_DEFAULTS, ...p }));
+        const active = profiles.some((p) => p.id === data.activeProfileId) ? data.activeProfileId : profiles[0].id;
+        this.settings = {
+          lang: data.lang ?? "zh",
+          profiles,
+          activeProfileId: active,
+          history: Array.isArray(data.history) ? data.history : [],
+          sessionId: data.sessionId ?? ""
+        };
+      } else if (data) {
+        const lang = data.lang ?? "zh";
+        const profile = {
+          id: newProfileId(),
+          name: t(lang, "defaultAgentName"),
+          protocol: PROVIDERS.find((p) => p.id === data.providerId)?.protocol ?? "openai",
+          providerId: data.providerId ?? PROFILE_DEFAULTS.providerId,
+          baseUrl: data.baseUrl ?? PROFILE_DEFAULTS.baseUrl,
+          apiKey: data.apiKey ?? "",
+          proxyUrl: data.proxyUrl ?? "",
+          model: data.model ?? PROFILE_DEFAULTS.model,
+          temperature: data.temperature ?? PROFILE_DEFAULTS.temperature,
+          maxTokens: data.maxTokens ?? PROFILE_DEFAULTS.maxTokens,
+          maxIterations: data.maxIterations ?? PROFILE_DEFAULTS.maxIterations,
+          autoContext: data.autoContext ?? PROFILE_DEFAULTS.autoContext,
+          autoApprove: data.autoApprove ?? PROFILE_DEFAULTS.autoApprove,
+          systemPrompt: data.systemPrompt ?? "",
+          searchMode: data.searchMode ?? PROFILE_DEFAULTS.searchMode,
+          searchApiKey: data.searchApiKey ?? "",
+          searchMaxResults: data.searchMaxResults ?? PROFILE_DEFAULTS.searchMaxResults,
+          searchDepth: data.searchDepth ?? PROFILE_DEFAULTS.searchDepth
+        };
+        this.settings = {
+          lang,
+          profiles: [profile],
+          activeProfileId: profile.id,
+          history: Array.isArray(data.history) ? data.history : [],
+          sessionId: data.sessionId ?? ""
+        };
+        migrated = true;
+      }
+      this.loaded = true;
+    } catch (e) {
+      console.error("[vault-agent] failed to load settings; keeping defaults without saving", e);
+      return;
+    }
+    if (migrated)
+      await this.saveSettings();
   }
   async saveSettings() {
+    if (!this.loaded)
+      return;
     await this.saveData(this.settings);
   }
+  // --------------------------------------------------------------- history
   loadHistory() {
     const h = this.settings.history;
     return Array.isArray(h) ? h.slice(-40) : [];
@@ -1823,10 +2329,12 @@ var VaultAgentPlugin = class extends import_obsidian3.Plugin {
     return new HistoryRecorder(this.app.vault.adapter, this.historyPath(), session, () => this.historyMeta(), cursor);
   }
   historyMeta() {
+    const p = this.profile;
     return {
       vault: this.app.vault.getName(),
-      provider: this.settings.providerId,
-      model: this.settings.model
+      provider: p.providerId,
+      model: p.model,
+      agent: p.name
     };
   }
 };
@@ -1838,18 +2346,117 @@ var VASettingTab = class extends import_obsidian3.PluginSettingTab {
   st(key) {
     return t(this.plugin.settings.lang, key);
   }
+  get profile() {
+    return this.plugin.profile;
+  }
+  /** Re-render: declarative tabs (1.13+) refresh via update(), older ones via display(). */
+  refreshTab() {
+    if ((0, import_obsidian3.requireApiVersion)("1.13.0"))
+      this.update();
+    else
+      this.display();
+  }
+  /** Called by the plugin when the active agent changes (e.g. from the view header). */
+  refresh() {
+    if (this.containerEl.isConnected)
+      this.refreshTab();
+  }
+  // ---------------------------------------------------- agent manager UI
+  /** Roster of agents: rename inline, switch by clicking, duplicate or delete. */
+  renderAgentManager(el) {
+    const s = this.plugin.settings;
+    el.empty();
+    for (const p of s.profiles) {
+      const active = p.id === s.activeProfileId;
+      const row = el.createDiv({ cls: "va-agent-row" + (active ? " va-agent-row-active" : "") });
+      const nameInput = row.createEl("input", { cls: "va-agent-name", attr: { type: "text", "aria-label": this.st("agentName") } });
+      nameInput.value = p.name;
+      nameInput.addEventListener("click", (e) => e.stopPropagation());
+      nameInput.addEventListener("change", () => {
+        p.name = nameInput.value.trim() || this.st("newAgentName");
+        nameInput.value = p.name;
+        void this.plugin.saveSettings().then(() => this.refreshTab());
+      });
+      row.createSpan({ cls: "va-agent-tag", text: p.protocol === "anthropic" ? "Anthropic" : "OpenAI" });
+      if (active)
+        row.createSpan({ cls: "va-agent-badge", text: this.st("agentActiveBadge") });
+      const actions = row.createDiv({ cls: "va-agent-actions" });
+      const dup = actions.createEl("button", { cls: "va-icon-btn", attr: { "aria-label": this.st("duplicateAgent"), title: this.st("duplicateAgent") } });
+      (0, import_obsidian3.setIcon)(dup, "copy");
+      dup.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.plugin.duplicateProfile(p.id);
+        this.refreshTab();
+      });
+      const del = actions.createEl("button", { cls: "va-icon-btn", attr: { "aria-label": this.st("deleteAgent"), title: this.st("deleteAgent") } });
+      (0, import_obsidian3.setIcon)(del, "trash-2");
+      del.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.deleteAgent(p.id);
+      });
+      if (!active) {
+        row.addEventListener("click", () => {
+          this.plugin.switchProfile(p.id);
+          this.refreshTab();
+        });
+      }
+    }
+    const buttons = el.createDiv({ cls: "va-agent-buttons" });
+    const add = buttons.createEl("button", { cls: "mod-cta", text: "\uFF0B " + this.st("newAgent") });
+    add.addEventListener("click", () => {
+      this.plugin.createProfile();
+      this.refreshTab();
+    });
+    const tpl = buttons.createEl("button", { text: "\u26A1 " + this.st("codingPlanTemplate") });
+    tpl.addEventListener("click", () => {
+      this.plugin.createProfile(this.st("codingAgentName"), "ark-coding");
+      this.refreshTab();
+    });
+  }
+  deleteAgent(id) {
+    if (this.plugin.settings.profiles.length <= 1) {
+      new import_obsidian3.Notice(this.st("deleteLastAgent"));
+      return;
+    }
+    const p = this.plugin.settings.profiles.find((x) => x.id === id);
+    if (!p || !window.confirm(`${this.st("confirmDeleteAgent")}
+
+${p.name}`))
+      return;
+    this.plugin.deleteProfile(id);
+    this.refreshTab();
+  }
   /**
    * Declarative settings (Obsidian 1.13+): makes settings searchable.
    * display() below still renders for older Obsidian versions.
    */
   getSettingDefinitions() {
-    const s = this.plugin.settings;
+    const s = this.profile;
     const providerHint = PROVIDERS.find((p) => p.id === s.providerId)?.hint;
     return [
       {
         name: this.st("language"),
         desc: this.st("languageDesc"),
         control: { type: "dropdown", key: "lang", options: { zh: "\u4E2D\u6587", en: "English" } }
+      },
+      {
+        name: this.st("agentsHeading"),
+        desc: this.st("agentsHeadingDesc"),
+        searchable: false,
+        render: (setting) => {
+          setting.settingEl.addClass("va-agents-setting");
+          const el = setting.controlEl.createDiv({ cls: "va-agents" });
+          this.renderAgentManager(el);
+          return () => setting.controlEl.empty();
+        }
+      },
+      {
+        name: "\u2699\uFE0F " + this.st("editingAgent") + " \xB7 " + this.profile.name,
+        searchable: false,
+        render: (setting) => {
+          setting.settingEl.addClass("va-hint");
+          return () => setting.settingEl.removeClass("va-hint");
+        }
       },
       {
         name: this.st("provider"),
@@ -1878,15 +2485,15 @@ var VASettingTab = class extends import_obsidian3.PluginSettingTab {
       {
         name: this.st("modelPreset"),
         searchable: false,
-        visible: () => !!PROVIDERS.find((p) => p.id === this.plugin.settings.providerId)?.models.length,
+        visible: () => !!PROVIDERS.find((p) => p.id === this.profile.providerId)?.models.length,
         render: (setting) => {
-          const preset = PROVIDERS.find((p) => p.id === this.plugin.settings.providerId);
+          const preset = PROVIDERS.find((p) => p.id === this.profile.providerId);
           for (const m of preset?.models ?? []) {
             const btn = setting.controlEl.createEl("button", { text: m });
-            if (m === this.plugin.settings.model)
+            if (m === this.profile.model)
               btn.addClass("va-chip-active");
             btn.addEventListener("click", () => {
-              this.plugin.settings.model = m;
+              this.profile.model = m;
               void this.plugin.saveSettings();
               setting.controlEl.querySelectorAll("button").forEach((b) => b.removeClass("va-chip-active"));
               btn.addClass("va-chip-active");
@@ -1937,9 +2544,9 @@ var VASettingTab = class extends import_obsidian3.PluginSettingTab {
   }
   /** Web-search settings; shared by the declarative and the legacy settings UI. */
   searchSettingDefinitions() {
-    const usesTool = () => ["auto", "tool"].includes(this.plugin.settings.searchMode);
+    const usesTool = () => ["auto", "tool"].includes(this.profile.searchMode);
     const nativeUnsupported = () => {
-      const s = this.plugin.settings;
+      const s = this.profile;
       return s.searchMode === "native" && !nativeSearchFor(s.providerId, s.searchMaxResults);
     };
     return [
@@ -1995,47 +2602,49 @@ var VASettingTab = class extends import_obsidian3.PluginSettingTab {
     ];
   }
   getControlValue(key) {
-    return this.plugin.settings[key];
+    if (key === "lang")
+      return this.plugin.settings.lang;
+    return this.profile[key];
   }
   async setControlValue(key, value) {
-    const s = this.plugin.settings;
-    s[key] = value;
-    if (key === "providerId" && typeof value === "string") {
-      const preset = PROVIDERS.find((p) => p.id === value);
-      if (preset) {
-        s.baseUrl = preset.baseUrl;
-        if (preset.models.length)
-          s.model = preset.models[0];
-      }
+    if (key === "lang") {
+      this.plugin.settings.lang = value;
+      await this.plugin.saveSettings();
+      window.setTimeout(() => this.refreshTab(), 0);
+      return;
     }
+    const s = this.profile;
+    s[key] = value;
     await this.plugin.saveSettings();
+    if (key === "providerId" && typeof value === "string") {
+      applyProviderPreset(s, value);
+      await this.plugin.saveSettings();
+      window.setTimeout(() => this.refreshTab(), 0);
+    }
   }
   display() {
     const { containerEl } = this;
     containerEl.empty();
-    const s = this.plugin.settings;
-    let searchEl = null;
+    const s = this.profile;
     new import_obsidian3.Setting(containerEl).setName(this.st("settingsHeading")).setHeading();
-    new import_obsidian3.Setting(containerEl).setName(this.st("language")).setDesc(this.st("languageDesc")).addDropdown((d) => d.addOption("zh", "\u4E2D\u6587").addOption("en", "English").setValue(s.lang).onChange(async (v) => {
-      s.lang = v;
+    new import_obsidian3.Setting(containerEl).setName(this.st("language")).setDesc(this.st("languageDesc")).addDropdown((d) => d.addOption("zh", "\u4E2D\u6587").addOption("en", "English").setValue(this.plugin.settings.lang).onChange(async (v) => {
+      this.plugin.settings.lang = v;
       await this.plugin.saveSettings();
+      this.refreshTab();
     }));
+    const agentsSetting = new import_obsidian3.Setting(containerEl).setName(this.st("agentsHeading")).setDesc(this.st("agentsHeadingDesc")).setClass("va-agents-setting");
+    this.renderAgentManager(agentsSetting.controlEl.createDiv({ cls: "va-agents" }));
+    const agentHead = new import_obsidian3.Setting(containerEl).setClass("va-hint");
+    agentHead.nameEl.setText("\u2699\uFE0F " + this.st("editingAgent") + " \xB7 " + s.name);
     const providerNames = PROVIDERS.map((p) => [p.id, p.label]);
     new import_obsidian3.Setting(containerEl).setName(this.st("provider")).setDesc(this.st("providerDesc")).addDropdown((d) => {
       for (const [id, label] of providerNames)
         d.addOption(id, label);
       d.setValue(s.providerId).onChange(async (v) => {
-        const preset = PROVIDERS.find((p) => p.id === v);
-        if (preset) {
-          s.baseUrl = preset.baseUrl;
-          if (preset.models.length)
-            s.model = preset.models[0];
-        }
+        applyProviderPreset(s, v);
         s.providerId = v;
         await this.plugin.saveSettings();
-        this.renderProviderExtras(containerEl);
-        if (searchEl)
-          this.renderSearchSettings(searchEl);
+        this.refreshTab();
       });
     });
     new import_obsidian3.Setting(containerEl).setName(this.st("baseUrl")).addText((tx) => tx.setValue(s.baseUrl).onChange(async (v) => {
@@ -2053,8 +2662,7 @@ var VASettingTab = class extends import_obsidian3.PluginSettingTab {
       s.proxyUrl = v.trim();
       await this.plugin.saveSettings();
     }));
-    const modelSetting = new import_obsidian3.Setting(containerEl).setName(this.st("model")).setDesc(this.st("modelDesc"));
-    modelSetting.addText((tx) => tx.setValue(s.model).onChange(async (v) => {
+    new import_obsidian3.Setting(containerEl).setName(this.st("model")).setDesc(this.st("modelDesc")).addText((tx) => tx.setValue(s.model).onChange(async (v) => {
       s.model = v.trim();
       await this.plugin.saveSettings();
     }));
@@ -2089,7 +2697,7 @@ var VASettingTab = class extends import_obsidian3.PluginSettingTab {
       s.systemPrompt = v;
       await this.plugin.saveSettings();
     }));
-    searchEl = containerEl.createDiv({ cls: "va-search-settings" });
+    const searchEl = containerEl.createDiv({ cls: "va-search-settings" });
     this.renderSearchSettings(searchEl);
   }
   /**
@@ -2097,7 +2705,7 @@ var VASettingTab = class extends import_obsidian3.PluginSettingTab {
    * place when the mode or provider changes, because several rows are conditional.
    */
   renderSearchSettings(el) {
-    const s = this.plugin.settings;
+    const s = this.profile;
     el.empty();
     const usesTool = () => ["auto", "tool"].includes(s.searchMode);
     const rerender = () => this.renderSearchSettings(el);
@@ -2133,7 +2741,7 @@ var VASettingTab = class extends import_obsidian3.PluginSettingTab {
   }
   /** Provider hint + model preset chips; re-rendered in place when the provider changes. */
   renderProviderExtras(containerEl) {
-    const s = this.plugin.settings;
+    const s = this.profile;
     const preset = PROVIDERS.find((p) => p.id === s.providerId);
     if (preset?.hint) {
       const hint = new import_obsidian3.Setting(containerEl).setClass("va-hint");

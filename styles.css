@@ -273,3 +273,46 @@
   background: var(--interactive-accent);
   color: var(--text-on-accent);
 }
+
+/* Multi-agent manager */
+.va-agents-setting .setting-item-info { margin-bottom: 6px; }
+.va-agents-setting .setting-item-control { justify-content: flex-start; }
+.va-agents { display: flex; flex-direction: column; gap: 6px; width: 100%; }
+.va-agent-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  cursor: pointer;
+}
+.va-agent-row:hover { background: var(--background-modifier-hover); }
+.va-agent-row-active {
+  border-color: var(--interactive-accent);
+  background: var(--background-modifier-hover);
+  cursor: default;
+}
+.va-agent-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--font-ui-small);
+}
+.va-agent-tag {
+  flex: 0 0 auto;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  padding: 0 6px;
+}
+.va-agent-badge {
+  flex: 0 0 auto;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-on-accent);
+  background: var(--interactive-accent);
+  border-radius: var(--radius-s);
+  padding: 0 6px;
+}
+.va-agent-actions { display: flex; gap: 2px; flex: 0 0 auto; }
+.va-agent-buttons { display: flex; gap: 8px; margin-top: 4px; }

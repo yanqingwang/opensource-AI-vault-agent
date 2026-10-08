@@ -1,5 +1,6 @@
 import { ItemView, WorkspaceLeaf, MarkdownRenderer, Notice, setIcon } from 'obsidian';
 import { ChatMessage, ToolCall, runAgentLoop, ToolDef, ToolExecutor, normalizeReasoning } from './agent';
+import { runAnthropicLoop } from './anthropic';
 import { FetchLike, makeProxyFetch } from './proxyFetch';
 import { parseHistory, sessionCursor, sessionTranscript, summarizeSessions, type HistoryEvent } from './history';
 import { buildWebSearchToolDef, createWebSearchExecutor, resolveSearch, withTimeout, WEB_SEARCH_TOOL_NAME, type SearchPost, type SearchSettings } from './search';
@@ -19,8 +20,8 @@ export class AgentView extends ItemView {
 	}
 
 	getViewType(): string { return VIEW_TYPE_AGENT; }
-	getDisplayText(): string { return t(this.plugin.settings.lang, 'viewName'); }
-	getIcon(): string { return t(this.plugin.settings.lang, 'viewIcon'); }
+	getDisplayText(): string { return t(this.plugin.lang, 'viewName'); }
+	getIcon(): string { return t(this.plugin.lang, 'viewIcon'); }
 
 	async onOpen(): Promise<void> {
 		this.messages = this.plugin.loadHistory();
@@ -47,7 +48,22 @@ export class AgentView extends ItemView {
 		this.abort?.abort();
 	}
 
-	private st(key: Parameters<typeof t>[1]): string { return t(this.plugin.settings.lang, key); }
+	private st(key: Parameters<typeof t>[1]): string { return t(this.plugin.lang, key); }
+
+	/** Header label: the active agent's name plus the model it will call. */
+	private brandLabel(): string {
+		return this.plugin.profile.name + ' · ' + this.plugin.currentModelLabel();
+	}
+
+	/** Anchor for the agent-switcher menu when opened from the command palette. */
+	getSwitcherAnchor(): HTMLElement | null {
+		return this.switchBtn ?? null;
+	}
+
+	/** The active agent changed (from the header menu or the settings tab). */
+	onProfileSwitched(): void {
+		this.brandEl?.setText(this.brandLabel());
+	}
 
 	private renderShell(): void {
 		const root = this.contentEl;
@@ -57,8 +73,11 @@ export class AgentView extends ItemView {
 		const header = root.createDiv({ cls: 'va-header' });
 		const brand = header.createDiv({ cls: 'va-brand' });
 		setIcon(brand, 'bot-message-square');
-		brand.createSpan({ text: this.st('viewName') + ' · ' + this.plugin.currentModelLabel() });
+		this.brandEl = brand.createSpan({ text: this.brandLabel() });
 		const actions = header.createDiv({ cls: 'va-header-actions' });
+		this.switchBtn = actions.createEl('button', { cls: 'va-icon-btn', attr: { 'aria-label': this.st('switchAgent'), title: this.st('switchAgent') } });
+		setIcon(this.switchBtn, 'chevrons-up-down');
+		this.switchBtn.addEventListener('click', e => this.plugin.openAgentSwitcher(e));
 		const historyBtn = actions.createEl('button', { cls: 'va-icon-btn', attr: { 'aria-label': this.st('history') } });
 		setIcon(historyBtn, 'history');
 		historyBtn.addEventListener('click', () => void this.openHistory());
@@ -107,6 +126,8 @@ export class AgentView extends ItemView {
 	}
 
 	private msgsEl!: HTMLElement;
+	private brandEl: HTMLElement | null = null;
+	private switchBtn: HTMLButtonElement | null = null;
 	private historyEl!: HTMLElement;
 	private inputAreaEl!: HTMLElement;
 	private inputEl!: HTMLTextAreaElement;
@@ -351,9 +372,9 @@ export class AgentView extends ItemView {
 	}
 
 	private buildSystemPrompt(): string {
-		const s = this.plugin.settings;
+		const s = this.plugin.profile;
 		const active = this.app.workspace.getActiveFile();
-		const zhMode = s.lang === 'zh';
+		const zhMode = this.plugin.lang === 'zh';
 		const base = s.systemPrompt.trim() || (
 			zhMode
 				? `你是 Obsidian 库（vault）内的智能体助手，可以借助工具读写和检索用户的笔记。规则：
@@ -390,7 +411,7 @@ export class AgentView extends ItemView {
 
 	/** Current web-search configuration, as the pure `search.ts` helpers expect it. */
 	private searchSettings(): SearchSettings {
-		const s = this.plugin.settings;
+		const s = this.plugin.profile;
 		return {
 			mode: s.searchMode,
 			providerId: s.providerId,
@@ -401,7 +422,7 @@ export class AgentView extends ItemView {
 	}
 
 	private confirmWrite(summary: string): Promise<boolean> {
-		const s = this.plugin.settings;
+		const s = this.plugin.profile;
 		if (s.autoApprove) return Promise.resolve(true);
 		return new Promise(resolve => {
 			const bar = this.msgsEl.createDiv({ cls: 'va-confirm' });
@@ -418,7 +439,7 @@ export class AgentView extends ItemView {
 
 	async send(): Promise<void> {
 		if (this.running) return;
-		const s = this.plugin.settings;
+		const s = this.plugin.profile;
 		if (!s.apiKey.trim()) {
 			new Notice(this.st('needApiKey'));
 			this.plugin.openSettings();
@@ -474,7 +495,8 @@ export class AgentView extends ItemView {
 		const toolStartedAt = new Map<string, number>();
 
 		try {
-			const { text, reasoning, hitCap } = await runAgentLoop({
+			// Provider-agnostic turn options; the protocol decides which loop runs.
+			const base = {
 				baseUrl: s.baseUrl,
 				apiKey: s.apiKey,
 				model: s.model,
@@ -484,26 +506,34 @@ export class AgentView extends ItemView {
 				messages: this.messages,
 				tools,
 				executor,
-				nativeSearch: search.native ?? undefined,
-				passthroughTools: search.native?.passthrough,
-				onSearchFallback: () => new Notice(this.st('searchFallback')),
 				signal: this.abort.signal,
-				confirmWrite: (summary) => this.confirmWrite(summary),
+				confirmWrite: (summary: string) => this.confirmWrite(summary),
 				fetchImpl,
 				fallbackPost: post,
-				onText: d => stream.push(d),
-				onReasoning: d => stream.pushReasoning(d),
-				onToolStart: call => {
+				onText: (d: string) => stream.push(d),
+				onReasoning: (d: string) => stream.pushReasoning(d),
+				onToolStart: (call: ToolCall) => {
 					toolStartedAt.set(call.id, Date.now());
 					history.toolCall(call);
 					chipQueue.push(this.addToolChip(call));
 				},
-				onToolDone: (call, result) => {
+				onToolDone: (call: ToolCall, result: { ok: boolean; content: string }) => {
 					history.toolResult(call, result, Date.now() - (toolStartedAt.get(call.id) ?? Date.now()));
 					const chip = chipQueue.shift();
 					if (chip) this.completeToolChip(chip, result);
 				}
-			});
+			};
+			// Coding Plan (and any Anthropic-compatible endpoint) speaks /v1/messages;
+			// everything else is OpenAI-compatible. Provider-native web search is an
+			// OpenAI-side concept only — Tavily works for both.
+			const { text, reasoning, hitCap } = s.protocol === 'anthropic'
+				? await runAnthropicLoop(base)
+				: await runAgentLoop({
+					...base,
+					nativeSearch: search.native ?? undefined,
+					passthroughTools: search.native?.passthrough,
+					onSearchFallback: () => new Notice(this.st('searchFallback'))
+				});
 			// A provider can end a turn with neither text nor tool calls (seen with
 			// DeepSeek), and the iteration cap produces the same shape. Rendering an
 			// empty bubble looks exactly like a frozen window, so always say what
@@ -519,7 +549,7 @@ export class AgentView extends ItemView {
 			history.assistant(reply, reasoning);
 		} catch (e: unknown) {
 			const aborted = this.abort.signal.aborted;
-			const msg = aborted ? (s.lang === 'zh' ? '（已停止）' : '(stopped)') : `${this.st('errPrefix')}: ${e instanceof Error ? e.message : String(e)}`;
+			const msg = aborted ? (this.plugin.lang === 'zh' ? '（已停止）' : '(stopped)') : `${this.st('errPrefix')}: ${e instanceof Error ? e.message : String(e)}`;
 			stream.finish(msg, '');
 			this.messages.push({ role: 'assistant', content: msg });
 			history.error(msg);

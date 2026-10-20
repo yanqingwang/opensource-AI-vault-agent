@@ -2,9 +2,15 @@
 
 [English](README.en.md) · [GitHub](https://github.com/yanqingwang/opensource-AI-vault-agent) · [MIT License](LICENSE)
 
+**Vault Agent** is an Obsidian plugin that turns your vault into an agentic workspace. It talks directly to LLM APIs that are usable from mainland China — DeepSeek, Zhipu GLM, Kimi (Moonshot), Qwen (DashScope), Volcengine Ark / Ark Coding Plan (Doubao-Seed-Code) and Tencent Hunyuan — as well as any OpenAI- or Anthropic-compatible endpoint. You can configure several agents (each with its own provider, API key and prompt) and switch between them from the view header. The agent can search, read, create and edit your notes on its own. No CLI, no overseas account and no environment variables required.
+
+> Chinese-first: the UI and the notes below are written in Chinese by default, but an English UI and a full English README are included. Switch the language in Settings → Vault Agent → Language. See [README.en.md](README.en.md) for the complete English documentation.
+
+---
+
 中文优先的 Obsidian vault 智能体插件——直连国产大模型 API（OpenAI 兼容协议 + Anthropic Messages 协议），智能体可自主**搜索、读取、创建、修改**你的笔记。无需安装任何 CLI，无需海外账号，无需配置环境变量。可配置**多个 Agent**（各自的服务商、Key、提示词），在标题栏一键切换。
 
-**当前版本：v0.2.0**
+**当前版本：v0.2.1**
 
 ## 为什么做这个
 

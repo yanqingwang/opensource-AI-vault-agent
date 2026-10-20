@@ -316,3 +316,4 @@
 }
 .va-agent-actions { display: flex; gap: 2px; flex: 0 0 auto; }
 .va-agent-buttons { display: flex; gap: 8px; margin-top: 4px; }
+.va-confirm-buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 1em; }

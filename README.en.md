@@ -4,7 +4,7 @@
 
 A China-first Obsidian agent plugin that talks directly to OpenAI-compatible and Anthropic Messages LLM APIs and can autonomously **search, read, create and edit** your notes. No CLI to install, no overseas account, no environment variables to configure. Configure **multiple agents** (each with its own provider, key and prompt) and switch between them from the header.
 
-**Current version: v0.2.0**
+**Current version: v0.2.1**
 
 ## Why
 

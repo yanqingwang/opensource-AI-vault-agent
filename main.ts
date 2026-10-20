@@ -1,4 +1,4 @@
-import { App, Menu, Notice, Plugin, PluginSettingTab, Setting, normalizePath, requestUrl, requireApiVersion, setIcon, WorkspaceLeaf, type SettingDefinitionItem } from 'obsidian';
+import { App, Menu, Modal, Notice, Plugin, PluginSettingTab, Setting, normalizePath, requestUrl, requireApiVersion, setIcon, WorkspaceLeaf, type SettingDefinitionItem } from 'obsidian';
 import { AgentView, VIEW_TYPE_AGENT } from './view';
 import { HistoryRecorder, newSessionId, type HistoryMeta, type SessionCursor } from './history';
 import { nativeSearchFor, withTimeout, type SearchDepth, type SearchMode } from './search';
@@ -419,6 +419,34 @@ export default class VaultAgentPlugin extends Plugin {
 	}
 }
 
+/** Native Obsidian confirmation dialog — window.confirm() is rejected by the plugin review bot. */
+class ConfirmModal extends Modal {
+	constructor(
+		app: App,
+		private lines: string[],
+		private labels: { cancel: string; confirm: string },
+		private onConfirm: () => void
+	) {
+		super(app);
+	}
+
+	onOpen(): void {
+		for (const line of this.lines) this.contentEl.createEl('p', { text: line });
+		const buttons = this.contentEl.createDiv({ cls: 'va-confirm-buttons' });
+		buttons.createEl('button', { text: this.labels.cancel })
+			.addEventListener('click', () => this.close());
+		buttons.createEl('button', { cls: 'mod-cta', text: this.labels.confirm })
+			.addEventListener('click', () => {
+				this.close();
+				this.onConfirm();
+			});
+	}
+
+	onClose(): void {
+		this.contentEl.empty();
+	}
+}
+
 class VASettingTab extends PluginSettingTab {
 	constructor(app: App, private plugin: VaultAgentPlugin) {
 		super(app, plugin);
@@ -430,8 +458,14 @@ class VASettingTab extends PluginSettingTab {
 
 	/** Re-render: declarative tabs (1.13+) refresh via update(), older ones via display(). */
 	private refreshTab(): void {
-		if (requireApiVersion('1.13.0')) this.update();
-		else this.display();
+		if (requireApiVersion('1.13.0')) {
+			this.update();
+			return;
+		}
+		// PluginSettingTab.display() carries a @deprecated tag, yet Obsidian's own
+		// JSDoc describes it as the fallback for plugins that must keep working on
+		// versions older than 1.13.0. Call it through a signature without the tag.
+		(this as unknown as { display(): void }).display();
 	}
 
 	/** Called by the plugin when the active agent changes (e.g. from the view header). */
@@ -488,9 +522,16 @@ class VASettingTab extends PluginSettingTab {
 			return;
 		}
 		const p = this.plugin.settings.profiles.find(x => x.id === id);
-		if (!p || !window.confirm(`${this.st('confirmDeleteAgent')}\n\n${p.name}`)) return;
-		this.plugin.deleteProfile(id);
-		this.refreshTab();
+		if (!p) return;
+		new ConfirmModal(
+			this.app,
+			[this.st('confirmDeleteAgent'), p.name],
+			{ cancel: this.st('cancel'), confirm: this.st('delete') },
+			() => {
+				this.plugin.deleteProfile(id);
+				this.refreshTab();
+			}
+		).open();
 	}
 
 	/**

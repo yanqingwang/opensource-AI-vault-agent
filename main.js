@@ -1043,6 +1043,8 @@ var zh = {
   switchAgentDesc: "\u5728\u5DF2\u914D\u7F6E\u7684\u591A\u4E2A Agent \u95F4\u5FEB\u901F\u5207\u6362\uFF0C\u5F53\u524D\u5BF9\u8BDD\u4FDD\u6301\u4E0D\u53D8\u3002",
   editingAgent: "\u5F53\u524D Agent \u914D\u7F6E",
   confirmDeleteAgent: "\u786E\u5B9A\u5220\u9664\u8BE5 Agent\uFF1F\u6B64\u64CD\u4F5C\u4E0D\u53EF\u64A4\u9500\u3002",
+  cancel: "\u53D6\u6D88",
+  delete: "\u5220\u9664",
   agentActiveBadge: "\u5F53\u524D",
   deleteLastAgent: "\u81F3\u5C11\u9700\u8981\u4FDD\u7559\u4E00\u4E2A Agent\u3002",
   switchedAgent: "\u5DF2\u5207\u6362\u5230\uFF1A",
@@ -1134,6 +1136,8 @@ var en = {
   switchAgentDesc: "Quickly switch between configured agents; the current conversation is kept.",
   editingAgent: "Current agent settings",
   confirmDeleteAgent: "Delete this agent? This cannot be undone.",
+  cancel: "Cancel",
+  delete: "Delete",
   agentActiveBadge: "active",
   deleteLastAgent: "At least one agent must remain.",
   switchedAgent: "Switched to: ",
@@ -2338,6 +2342,27 @@ var VaultAgentPlugin = class extends import_obsidian3.Plugin {
     };
   }
 };
+var ConfirmModal = class extends import_obsidian3.Modal {
+  constructor(app, lines, labels, onConfirm) {
+    super(app);
+    this.lines = lines;
+    this.labels = labels;
+    this.onConfirm = onConfirm;
+  }
+  onOpen() {
+    for (const line of this.lines)
+      this.contentEl.createEl("p", { text: line });
+    const buttons = this.contentEl.createDiv({ cls: "va-confirm-buttons" });
+    buttons.createEl("button", { text: this.labels.cancel }).addEventListener("click", () => this.close());
+    buttons.createEl("button", { cls: "mod-cta", text: this.labels.confirm }).addEventListener("click", () => {
+      this.close();
+      this.onConfirm();
+    });
+  }
+  onClose() {
+    this.contentEl.empty();
+  }
+};
 var VASettingTab = class extends import_obsidian3.PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
@@ -2419,12 +2444,17 @@ var VASettingTab = class extends import_obsidian3.PluginSettingTab {
       return;
     }
     const p = this.plugin.settings.profiles.find((x) => x.id === id);
-    if (!p || !window.confirm(`${this.st("confirmDeleteAgent")}
-
-${p.name}`))
+    if (!p)
       return;
-    this.plugin.deleteProfile(id);
-    this.refreshTab();
+    new ConfirmModal(
+      this.app,
+      [this.st("confirmDeleteAgent"), p.name],
+      { cancel: this.st("cancel"), confirm: this.st("delete") },
+      () => {
+        this.plugin.deleteProfile(id);
+        this.refreshTab();
+      }
+    ).open();
   }
   /**
    * Declarative settings (Obsidian 1.13+): makes settings searchable.

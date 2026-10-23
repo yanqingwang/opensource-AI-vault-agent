@@ -1636,7 +1636,7 @@ var AgentView = class extends import_obsidian2.ItemView {
       else if (m.role === "assistant" && m.content)
         this.renderAssistantDone(m.content);
     }
-    this.scrollBottom();
+    this.scrollBottom(true);
   }
   /** Chat and history share the view; the panel replaces the message list. */
   setMode(mode) {
@@ -1713,7 +1713,23 @@ var AgentView = class extends import_obsidian2.ItemView {
       this.addWelcome();
     new import_obsidian2.Notice(`${this.st("historyLoaded")}: ${sessionId.slice(0, 8)}`);
   }
-  scrollBottom() {
+  /**
+   * Whether the transcript is scrolled to (or within a line of) the bottom.
+   * Streaming used to call scrollBottom() unconditionally, so every token yanked
+   * the panel back down and reading anything further up was impossible.
+   */
+  isNearBottom() {
+    const el = this.msgsEl;
+    return el.scrollHeight - el.scrollTop - el.clientHeight <= 24;
+  }
+  /**
+   * Follow new output only while the reader is already at the bottom.
+   * `force` is for explicit jumps (sending a message, loading a session, or a
+   * confirmation that blocks the turn and must be visible).
+   */
+  scrollBottom(force = false) {
+    if (!force && !this.isNearBottom())
+      return;
     this.msgsEl.scrollTop = this.msgsEl.scrollHeight;
   }
   /**
@@ -1901,7 +1917,7 @@ var AgentView = class extends import_obsidian2.ItemView {
       };
       yes.addEventListener("click", () => done(true));
       no.addEventListener("click", () => done(false));
-      this.scrollBottom();
+      this.scrollBottom(true);
     });
   }
   async send() {
@@ -1922,6 +1938,7 @@ var AgentView = class extends import_obsidian2.ItemView {
     this.stopBtn.disabled = false;
     this.sendBtn.disabled = true;
     this.renderUserBubble(input);
+    this.scrollBottom(true);
     this.messages.push({ role: "user", content: input });
     const history = this.plugin.history;
     history.user(input);
@@ -2016,7 +2033,7 @@ function formatStamp(iso) {
 
 // main.ts
 var PROVIDERS = [
-  { id: "deepseek", label: "DeepSeek \u6DF1\u5EA6\u6C42\u7D22", baseUrl: "https://api.deepseek.com/v1", models: ["deepseek-chat", "deepseek-reasoner"] },
+  { id: "deepseek", label: "DeepSeek \u6DF1\u5EA6\u6C42\u7D22", baseUrl: "https://api.deepseek.com/v1", models: ["deepseek-v4.1-flash", "deepseek-v4-pro"], hint: "V4.1 Flash \u7684\u5B98\u65B9\u8C03\u7528\u540D\u4E3A deepseek-flash\uFF08\u540C\u4E00\u6A21\u578B\uFF09\uFF1B\u4EE5 api.deepseek.com \u5B9E\u9645\u8FD4\u56DE\u4E3A\u51C6" },
   { id: "glm", label: "\u667A\u8C31 GLM (bigmodel.cn)", baseUrl: "https://open.bigmodel.cn/api/paas/v4", models: ["glm-4.6", "glm-4.5-air"], hint: "\u6A21\u578B ID \u4EE5 bigmodel.cn \u63A7\u5236\u53F0\u4E3A\u51C6" },
   { id: "zai", label: "Z.ai (GLM \u6D77\u5916\u7248)", baseUrl: "https://api.z.ai/api/paas/v4", models: ["glm-4.6", "glm-4.5-air"] },
   { id: "kimi", label: "Kimi (Moonshot \u6708\u4E4B\u6697\u9762)", baseUrl: "https://api.moonshot.cn/v1", models: ["kimi-k2-turbo-preview", "kimi-k2-preview", "moonshot-v1-32k"], hint: "K \u7CFB\u5217\u6A21\u578B ID \u4EE5 platform.moonshot.cn \u4E3A\u51C6" },
@@ -2049,7 +2066,7 @@ var PROFILE_DEFAULTS = {
   baseUrl: "https://api.deepseek.com/v1",
   apiKey: "",
   proxyUrl: "",
-  model: "deepseek-chat",
+  model: "deepseek-v4.1-flash",
   temperature: 0.7,
   maxTokens: 8192,
   maxIterations: 12,
@@ -2376,10 +2393,11 @@ var VASettingTab = class extends import_obsidian3.PluginSettingTab {
   }
   /** Re-render: declarative tabs (1.13+) refresh via update(), older ones via display(). */
   refreshTab() {
-    if ((0, import_obsidian3.requireApiVersion)("1.13.0"))
+    if ((0, import_obsidian3.requireApiVersion)("1.13.0")) {
       this.update();
-    else
-      this.display();
+      return;
+    }
+    this.display();
   }
   /** Called by the plugin when the active agent changes (e.g. from the view header). */
   refresh() {

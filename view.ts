@@ -147,7 +147,7 @@ export class AgentView extends ItemView {
 			if (m.role === 'user') this.renderUserBubble(m.content ?? '');
 			else if (m.role === 'assistant' && m.content) this.renderAssistantDone(m.content);
 		}
-		this.scrollBottom();
+		this.scrollBottom(true);
 	}
 
 	/** Chat and history share the view; the panel replaces the message list. */
@@ -231,7 +231,23 @@ export class AgentView extends ItemView {
 		new Notice(`${this.st('historyLoaded')}: ${sessionId.slice(0, 8)}`);
 	}
 
-	private scrollBottom(): void {
+	/**
+	 * Whether the transcript is scrolled to (or within a line of) the bottom.
+	 * Streaming used to call scrollBottom() unconditionally, so every token yanked
+	 * the panel back down and reading anything further up was impossible.
+	 */
+	private isNearBottom(): boolean {
+		const el = this.msgsEl;
+		return el.scrollHeight - el.scrollTop - el.clientHeight <= 24;
+	}
+
+	/**
+	 * Follow new output only while the reader is already at the bottom.
+	 * `force` is for explicit jumps (sending a message, loading a session, or a
+	 * confirmation that blocks the turn and must be visible).
+	 */
+	private scrollBottom(force = false): void {
+		if (!force && !this.isNearBottom()) return;
 		this.msgsEl.scrollTop = this.msgsEl.scrollHeight;
 	}
 
@@ -433,7 +449,8 @@ export class AgentView extends ItemView {
 			const done = (v: boolean) => { bar.remove(); resolve(v); };
 			yes.addEventListener('click', () => done(true));
 			no.addEventListener('click', () => done(false));
-			this.scrollBottom();
+			// This blocks the turn until answered, so it has to be visible.
+			this.scrollBottom(true);
 		});
 	}
 
@@ -454,6 +471,8 @@ export class AgentView extends ItemView {
 		this.sendBtn.disabled = true;
 
 		this.renderUserBubble(input);
+		// Sending is an explicit jump to the bottom, even if the reader had scrolled up.
+		this.scrollBottom(true);
 		this.messages.push({ role: 'user', content: input });
 		const history = this.plugin.history;
 		history.user(input);

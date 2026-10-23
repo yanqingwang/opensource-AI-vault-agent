@@ -19,7 +19,7 @@ export interface ProviderPreset {
 
 /** Curated OpenAI-compatible providers. "同源" rows are the model vendors behind popular Chinese AI tools. */
 export const PROVIDERS: ProviderPreset[] = [
-	{ id: 'deepseek', label: 'DeepSeek 深度求索', baseUrl: 'https://api.deepseek.com/v1', models: ['deepseek-chat', 'deepseek-reasoner'] },
+	{ id: 'deepseek', label: 'DeepSeek 深度求索', baseUrl: 'https://api.deepseek.com/v1', models: ['deepseek-v4.1-flash', 'deepseek-v4-pro'], hint: 'V4.1 Flash 的官方调用名为 deepseek-flash（同一模型）；以 api.deepseek.com 实际返回为准' },
 	{ id: 'glm', label: '智谱 GLM (bigmodel.cn)', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', models: ['glm-4.6', 'glm-4.5-air'], hint: '模型 ID 以 bigmodel.cn 控制台为准' },
 	{ id: 'zai', label: 'Z.ai (GLM 海外版)', baseUrl: 'https://api.z.ai/api/paas/v4', models: ['glm-4.6', 'glm-4.5-air'] },
 	{ id: 'kimi', label: 'Kimi (Moonshot 月之暗面)', baseUrl: 'https://api.moonshot.cn/v1', models: ['kimi-k2-turbo-preview', 'kimi-k2-preview', 'moonshot-v1-32k'], hint: 'K 系列模型 ID 以 platform.moonshot.cn 为准' },
@@ -89,7 +89,7 @@ const PROFILE_DEFAULTS: Omit<AgentProfile, 'id' | 'name'> = {
 	baseUrl: 'https://api.deepseek.com/v1',
 	apiKey: '',
 	proxyUrl: '',
-	model: 'deepseek-chat',
+	model: 'deepseek-v4.1-flash',
 	temperature: 0.7,
 	maxTokens: 8192,
 	maxIterations: 12,

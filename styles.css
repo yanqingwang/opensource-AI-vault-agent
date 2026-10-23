@@ -5,6 +5,22 @@
   flex-direction: column;
   height: 100%;
   padding: 0;
+  /* Obsidian sets `user-select: none` on `body` and re-enables text selection only
+     for markdown views. A custom view inherits `none`, so the transcript could not
+     be selected or copied at all. Opt back in for the whole panel. */
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* `.workspace-leaf-content .view-content` (0,2,0) also matches this element and
+   out-specifies a bare `.va-root`, so the panel inherited Obsidian's
+   `padding: 12px 12px 32px` and `overflow: auto` -- a second scroll container
+   wrapped around `.va-messages`. Reclaim the box so the message list is the only
+   thing that scrolls. */
+.view-content.va-root,
+.workspace-leaf-content[data-type="vault-agent-view"] .view-content.va-root {
+  padding: 0;
+  overflow: hidden;
 }
 .va-header {
   display: flex;
@@ -14,6 +30,7 @@
   padding: 8px 12px;
   border-bottom: 1px solid var(--background-modifier-border);
   flex: 0 0 auto;
+  user-select: none;
 }
 .va-brand {
   display: flex;
@@ -43,6 +60,9 @@
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
+  /* Keep a wheel/trackpad gesture inside the transcript: without this, scrolling
+     past the first message chains out to the sidebar and the list snaps back. */
+  overscroll-behavior: contain;
   padding: 10px 12px;
   display: flex;
   flex-direction: column;

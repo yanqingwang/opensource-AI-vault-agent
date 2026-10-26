@@ -54,7 +54,9 @@
 
 - **＋ 新建空白 Agent**：从默认值开始，自行选择服务商并填 Key。
 - **⚡ 用火山 Coding Plan 模板新建**：预填 Anthropic 协议、Base URL `https://ark.cn-beijing.volces.com/api/coding` 与模型 `doubao-seed-code-preview-latest`，只需粘贴套餐专属 API Key。
-- 点击某个 Agent 行即切换为当前 Agent；可内联重命名，也可复制/删除（至少保留一个）。
+- 点击某个 Agent 行即切换为**当前** Agent；可内联重命名，也可复制/删除（至少保留一个）。
+- 行内有两枚标记：**当前**（这一轮用的）和 **默认**（新对话从哪个 Agent 开始）。
+  点行尾星标把某个 Agent 设为默认；切换 Agent 不会改变「默认」。
 
 > **火山方舟 Coding Plan**：先在火山方舟控制台购买 Coding Plan（Lite/Pro 订阅），再创建**套餐专属** API Key（与通用方舟 Key 不互通），模型 ID 以控制台为准。同一套餐有两个入口，插件都提供预设：
 >

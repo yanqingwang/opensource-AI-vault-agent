@@ -48,7 +48,8 @@ Settings → AI Vault Agent CN → the **Agents** section manages your agents:
 
 - **New blank agent**: start from defaults, pick a provider and paste a key.
 - **New from Volcengine Coding Plan template**: pre-fills the Anthropic protocol, base URL `https://ark.cn-beijing.volces.com/api/coding` and model `doubao-seed-code-preview-latest` — just paste the plan's API key.
-- Click an agent row to make it active; rename inline, duplicate or delete (at least one agent is kept).
+- Click an agent row to make it **active**; rename inline, duplicate or delete (at least one agent is kept).
+- Two badges: **active** (the one this turn uses) and **default** (the one a fresh conversation starts on). The star at the end of a row sets the default; switching agents does not change which one is default.
 
 > **Volcengine Ark Coding Plan**: buy a Coding Plan (Lite/Pro) in the Ark console first, then create a **plan-specific** API key (it is not interchangeable with a general Ark key); the model ID is whatever the console lists. The plan exposes two entries and both have presets:
 >

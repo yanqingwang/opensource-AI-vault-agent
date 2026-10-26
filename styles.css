@@ -325,16 +325,40 @@
   font-size: var(--font-ui-smaller);
   font-weight: 400;
 }
-.va-model-chips { flex-wrap: wrap; }
+/* The model row is a catalog, not a one-line setting: the chips need the full
+   width. Left in Obsidian's default flex row, the control's `flex: 1 1 auto`
+   plus a wide chip row squeezed the label into a narrow column. Stack the row so
+   the label keeps its line and the chips get everything below it. */
+.va-model-chips {
+  flex-direction: column;
+  align-items: stretch;
+  flex-wrap: nowrap;
+}
+.va-model-chips .setting-item-info {
+  width: 100%;
+  margin-bottom: 6px;
+}
+.va-model-chips .setting-item-control {
+  width: 100%;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-start;
+}
+/* A gateway catalog can hold dozens of models, so it scrolls. The frame makes
+   that obvious: without a border, the cut-off row of chips reads as broken
+   layout rather than as a scrollable list. */
 .va-model-chip-row {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
   align-items: center;
-  /* A gateway catalog can hold dozens of models; keep the row from pushing the
-     rest of the settings off-screen. */
   max-height: 30vh;
   overflow-y: auto;
+  padding: 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-secondary);
 }
 .va-model-chip-row button { font-size: var(--font-ui-smaller); }
 .va-model-chip-row button.va-chip-active {
@@ -343,7 +367,6 @@
 }
 .va-chip-bar { display: flex; align-items: center; gap: 6px; flex-basis: 100%; }
 .va-chip-status { font-size: var(--font-ui-smaller); color: var(--text-faint); }
-.va-model-chips .setting-item-control { flex-wrap: wrap; gap: 6px; }
 
 /* Multi-agent manager */
 .va-agents-setting .setting-item-info { margin-bottom: 6px; }

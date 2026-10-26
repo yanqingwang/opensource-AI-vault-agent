@@ -1,8 +1,9 @@
-import { App, Menu, Modal, Notice, Plugin, PluginSettingTab, Setting, normalizePath, requestUrl, requireApiVersion, setIcon, WorkspaceLeaf, type SettingDefinitionItem } from 'obsidian';
+import { App, Menu, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile, normalizePath, requestUrl, requireApiVersion, setIcon, WorkspaceLeaf, type SettingDefinitionItem } from 'obsidian';
 import { AgentView, VIEW_TYPE_AGENT } from './view';
-import { HistoryRecorder, newSessionId, type HistoryMeta, type SessionCursor } from './history';
+import { HistoryRecorder, newSessionId, parseHistory, type HistoryMeta, type SessionCursor } from './history';
 import { nativeSearchFor, withTimeout, type SearchDepth, type SearchMode } from './search';
 import { t, tf, Lang } from './i18n';
+import { MEMORY_FOLDER, memoryPath, renderMemoryNote } from './memory';
 import { MAGPIE_BASE_URL, MAGPIE_KEY, magpieModelsUrl, parseMagpieModels, pickDefaultMagpieModel, type MagpieModel } from './magpie';
 
 /** Wire protocol a provider speaks. Coding Plan (and Anthropic itself) use 'anthropic'. */
@@ -95,6 +96,8 @@ export interface VASettings {
 	history: ChatMessage[];
 	/** Id of the conversation currently being appended to history.jsonl. */
 	sessionId: string;
+	/** Write every conversation into the vault as a note under `CN AI Agent/`. */
+	memoryNotes: boolean;
 }
 
 type ChatMessage = import('./agent').ChatMessage;
@@ -186,7 +189,7 @@ export function reconcileProviderIds(profiles: AgentProfile[]): boolean {
 
 function defaultSettings(): VASettings {
 	const profile = makeProfile('默认 Agent');
-	return { lang: 'zh', profiles: [profile], activeProfileId: profile.id, history: [], sessionId: '' };
+	return { lang: 'zh', profiles: [profile], activeProfileId: profile.id, history: [], sessionId: '', memoryNotes: true };
 }
 
 export default class VaultAgentPlugin extends Plugin {
@@ -195,6 +198,8 @@ export default class VaultAgentPlugin extends Plugin {
 	private settingTab: VASettingTab | null = null;
 	/** Set once settings have been read successfully; guards against clobbering data.json. */
 	private loaded = false;
+	/** The memory-note failure notice is shown once per session, not per turn. */
+	private memoryWarned = false;
 
 	/** The agent profile currently in use. */
 	get profile(): AgentProfile {
@@ -406,7 +411,8 @@ export default class VaultAgentPlugin extends Plugin {
 					profiles,
 					activeProfileId: active,
 					history: Array.isArray(data.history) ? data.history : [],
-					sessionId: data.sessionId ?? ''
+					sessionId: data.sessionId ?? '',
+					memoryNotes: data.memoryNotes ?? true
 				};
 			} else if (data) {
 				// Legacy single-provider layout: everything lived at the top level. Fold it
@@ -437,7 +443,8 @@ export default class VaultAgentPlugin extends Plugin {
 					profiles: [profile],
 					activeProfileId: profile.id,
 					history: Array.isArray(data.history) ? data.history : [],
-					sessionId: data.sessionId ?? ''
+					sessionId: data.sessionId ?? '',
+					memoryNotes: data.memoryNotes ?? true
 				};
 				migrated = true;
 			}
@@ -503,6 +510,44 @@ export default class VaultAgentPlugin extends Plugin {
 		this.settings.sessionId = sessionId;
 		this.recorder = this.newRecorder(sessionId, cursor);
 		void this.saveSettings();
+	}
+
+	/**
+	 * Rewrite the current session's memory note from `history.jsonl`.
+	 *
+	 * Called at the end of every turn rather than on unload: the note must be
+	 * current even if Obsidian is quit abruptly, and one note per session means a
+	 * rewrite is cheap and idempotent. Failures are reported once and then
+	 * swallowed — a memory note is a convenience, never a reason to fail a turn.
+	 */
+	async saveMemoryNote(): Promise<void> {
+		if (!this.settings.memoryNotes) return;
+		const session = this.settings.sessionId;
+		if (!session) return;
+		try {
+			const events = parseHistory(await this.readHistoryText()).filter(e => e.session === session);
+			if (!events.some(e => e.type === 'user' || e.type === 'assistant')) return;
+			const first = events.reduce((min, e) => Math.min(min, e.ts ?? 0), Number.MAX_SAFE_INTEGER);
+			const path = normalizePath(memoryPath(session, first));
+			await this.ensureFolder(MEMORY_FOLDER);
+			const text = renderMemoryNote(session, events);
+			const existing = this.app.vault.getAbstractFileByPath(path);
+			if (existing instanceof TFile) await this.app.vault.modify(existing, text);
+			else await this.app.vault.create(path, text);
+		} catch (e: unknown) {
+			if (!this.memoryWarned) {
+				this.memoryWarned = true;
+				console.error('[vault-agent] could not write the memory note', e);
+				new Notice(t(this.settings.lang, 'memoryFailed'));
+			}
+		}
+	}
+
+	/** Create `CN AI Agent/` (and any parent) once; a no-op when it exists. */
+	private async ensureFolder(path: string): Promise<void> {
+		const existing = this.app.vault.getAbstractFileByPath(path);
+		if (existing) return;
+		await this.app.vault.createFolder(path).catch(() => undefined);
 	}
 
 	/** Raw `history.jsonl` text; empty string when nothing has been recorded yet. */
@@ -759,6 +804,11 @@ class VASettingTab extends PluginSettingTab {
 				control: { type: 'toggle', key: 'autoApprove' }
 			},
 			{
+				name: this.st('memoryNotes'),
+				desc: this.st('memoryNotesDesc'),
+				control: { type: 'toggle', key: 'memoryNotes' }
+			},
+			{
 				name: this.st('systemPrompt'),
 				desc: this.st('systemPromptDesc'),
 				control: { type: 'textarea', key: 'systemPrompt', rows: 4 }
@@ -828,11 +878,16 @@ class VASettingTab extends PluginSettingTab {
 	}
 
 	override getControlValue(key: string): unknown {
-		if (key === 'lang') return this.plugin.settings.lang;
+		if (key === 'lang' || key === 'memoryNotes') return (this.plugin.settings as unknown as Record<string, unknown>)[key];
 		return (this.profile as unknown as Record<string, unknown>)[key];
 	}
 
 	override async setControlValue(key: string, value: unknown): Promise<void> {
+		if (key === 'memoryNotes') {
+			this.plugin.settings.memoryNotes = value === true;
+			await this.plugin.saveSettings();
+			return;
+		}
 		if (key === 'lang') {
 			this.plugin.settings.lang = value as Lang;
 			await this.plugin.saveSettings();
@@ -959,6 +1014,13 @@ class VASettingTab extends PluginSettingTab {
 			.setName(this.st('autoApprove'))
 			.setDesc(this.st('autoApproveDesc'))
 			.addToggle(tg => tg.setValue(s.autoApprove).onChange(async v => { s.autoApprove = v; await this.plugin.saveSettings(); }));
+
+		new Setting(containerEl)
+			.setName(this.st('memoryNotes'))
+			.setDesc(this.st('memoryNotesDesc'))
+			.addToggle(tg => tg
+				.setValue(this.plugin.settings.memoryNotes)
+				.onChange(async v => { this.plugin.settings.memoryNotes = v; await this.plugin.saveSettings(); }));
 
 		new Setting(containerEl)
 			.setName(this.st('systemPrompt'))

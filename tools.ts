@@ -207,12 +207,19 @@ export class VaultToolExecutor implements ToolExecutor {
 		return `path: ${file.path}\n---\n` + truncate(text, MAX_READ);
 	}
 
+	/**
+	 * Create every missing parent folder of `path`, outermost first.
+	 *
+	 * The recursive call must pass the folder itself: passing a fake child
+	 * (`dir + '/x'`) recomputed the same `dir` on every level and recursed until
+	 * the stack overflowed, so no note could be created in a new subfolder.
+	 */
 	private async ensureFolder(path: string): Promise<void> {
 		const idx = path.lastIndexOf('/');
 		if (idx <= 0) return;
 		const dir = this.resolve(path.slice(0, idx));
 		if (!dir || this.app.vault.getAbstractFileByPath(dir)) return;
-		await this.ensureFolder(dir + '/x');
+		await this.ensureFolder(dir);
 		if (!this.app.vault.getAbstractFileByPath(dir)) await this.app.vault.createFolder(dir);
 	}
 

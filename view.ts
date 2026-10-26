@@ -593,6 +593,10 @@ export class AgentView extends ItemView {
 			this.stopBtn.disabled = true;
 			this.sendBtn.disabled = false;
 			void this.plugin.saveHistory(this.messages);
+			// The turn is over, so history.jsonl is complete for it: refresh the
+			// vault note now, not only when the view closes.
+			await this.plugin.history.flush();
+			void this.plugin.saveMemoryNote();
 		}
 	}
 }

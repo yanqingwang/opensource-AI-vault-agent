@@ -4,7 +4,7 @@
 
 A China-first Obsidian agent plugin that talks directly to OpenAI-compatible and Anthropic Messages LLM APIs and can autonomously **search, read, create and edit** your notes. No CLI to install, no overseas account, no environment variables to configure. Configure **multiple agents** (each with its own provider, key and prompt) and switch between them from the header.
 
-**Current version: v0.3.0**
+**Current version: v0.3.1**
 
 ## Why
 
@@ -40,6 +40,7 @@ The closest equivalent overseas ([Claudian](https://github.com/yishentu/claudian
 - **Anthropic Messages protocol**: alongside the OpenAI-compatible protocol, Anthropic Messages (`POST /v1/messages`) is supported, so Anthropic-compatible endpoints such as Volcengine Ark's Coding Plan work directly.
 - **Magpie gateway (one-click template)**: one button creates an agent wired to the Magpie gateway, and the model list is read live from its `/v1/models` instead of being typed by hand.
 - **Copyable messages**: every user message and answer carries a copy button (shown on hover); clicking it copies that message as plain text/Markdown and flips the icon to a check.
+- **Conversations are memory**: after every turn the session is written to a note under `CN AI Agent/`, so a conversation is searchable, linkable and referenceable from other notes.
 
 ## Multiple agents and Volcengine Ark Coding Plan
 
@@ -76,6 +77,20 @@ Boundaries worth knowing:
 - **The key is not a secret.** The local gateway accepts any key; `magpie-ai-vault-agent` only makes Magpie's usage page and routing rules attribute this client to `ai-vault-agent`. Switching to a real vendor clears it, so it can never be mistaken for a credential.
 - **The port can move.** If you change `port` in Magpie's `settings.json`, change the base URL to match; Magpie's "share on the local network" address works too.
 - Model ids are Magpie's `provider/model` (or a routing group name) exactly as `/v1/models` returns them; this plugin ships no fixed list.
+
+## Conversation memory (the CN AI Agent folder)
+
+With **Save conversations as vault memory** on (the default), every turn ends by writing the current session to a note in the vault:
+
+```
+CN AI Agent/2026-10-27 1405 abcd1234.md
+```
+
+- One note per session: the filename is the start date, start time and the first 8 characters of the session id. Later turns **update the same note** instead of creating more files.
+- The body is ordinary Markdown: frontmatter (title/session/agent/provider/model/created/updated/turns/tags) plus chronological `## 🧑 我` / `## 🤖 智能体` sections.
+- The model's **reasoning** goes into a collapsed callout (`> [!note]- 思考过程`) so it does not get in the way of the answer.
+- Tool calls and results are **not** written: that is chat plumbing, and it would drown the conversation. The full event log stays in `history.jsonl`.
+- Turning the switch off restores the old behaviour (`data.json` plus `history.jsonl` only).
 
 ## Installation
 

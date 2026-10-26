@@ -1,18 +1,22 @@
 {
   "name": "opensource-ai-vault-agent",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "AI vault agent powered by China-accessible LLM APIs (DeepSeek / GLM / Kimi / Qwen / Volcengine Ark Coding Plan / any OpenAI- or Anthropic-compatible endpoint). Multiple switchable agents, agentic read/search/create/edit of notes — no CLI.",
   "main": "main.js",
   "scripts": {
     "dev": "node esbuild.config.mjs",
     "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
-    "test": "node test/agent.test.mjs && node test/anthropic.test.mjs && node test/history.test.mjs && node test/search.test.mjs && node test/magpie.test.mjs"
+    "test": "node test/agent.test.mjs && node test/anthropic.test.mjs && node test/history.test.mjs && node test/search.test.mjs && node test/magpie.test.mjs && node test/clipboard.test.mjs && node test/memory.test.mjs && node test/tools.test.mjs",
+    "lint": "eslint . --max-warnings 0"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
     "esbuild": "^0.19.0",
+    "eslint": "^9.39.5",
+    "eslint-plugin-obsidianmd": "^0.4.2",
     "obsidian": "^1.5.0",
     "tslib": "^2.6.0",
-    "typescript": "^5.3.0"
+    "typescript": "^5.3.0",
+    "typescript-eslint": "^8.72.1"
   }
 }

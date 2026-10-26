@@ -1042,6 +1042,9 @@ var zh = {
   magpieModelsLoaded: "\u5DF2\u8BFB\u53D6 {n} \u4E2A\u6A21\u578B",
   magpieUnreachable: "\u8FDE\u4E0D\u4E0A Magpie \u7F51\u5173\uFF08{url}\uFF09\u3002\u8BF7\u786E\u8BA4 Magpie \u5DF2\u542F\u52A8\uFF0C\u6216\u628A Base URL \u6539\u6210\u7F51\u5173\u5B9E\u9645\u7AEF\u53E3\u3002",
   magpieModelPicked: "Magpie Agent \u5DF2\u521B\u5EFA\uFF0C\u6A21\u578B\uFF1A{model}",
+  memoryNotes: "\u628A\u5BF9\u8BDD\u4FDD\u5B58\u4E3A\u5E93\u5185\u8BB0\u5FC6",
+  memoryNotesDesc: "\u6BCF\u8F6E\u5BF9\u8BDD\u7ED3\u675F\u540E\uFF0C\u628A\u5F53\u524D\u4F1A\u8BDD\u5199\u6210 CN AI Agent/ \u6587\u4EF6\u5939\u4E0B\u7684\u4E00\u7BC7\u7B14\u8BB0\uFF08\u540C\u4E00\u4F1A\u8BDD\u6301\u7EED\u66F4\u65B0\u540C\u4E00\u7BC7\uFF09\u3002",
+  memoryFailed: "\u65E0\u6CD5\u5199\u5165 CN AI Agent/ \u8BB0\u5FC6\u7B14\u8BB0\uFF0C\u8BF7\u68C0\u67E5\u5E93\u7684\u5199\u5165\u6743\u9650\u3002",
   copyMessage: "\u590D\u5236\u8FD9\u6761\u6D88\u606F",
   copied: "\u5DF2\u590D\u5236",
   copyFailed: "\u590D\u5236\u5931\u8D25",
@@ -1147,6 +1150,9 @@ var en = {
   magpieModelsLoaded: "{n} models loaded",
   magpieUnreachable: "Cannot reach the Magpie gateway ({url}). Check that Magpie is running, or point Base URL at its actual port.",
   magpieModelPicked: "Magpie agent created, model: {model}",
+  memoryNotes: "Save conversations as vault memory",
+  memoryNotesDesc: "After every turn, write the current session to a note under CN AI Agent/ (the same note is updated for the same session).",
+  memoryFailed: "Could not write the memory note under CN AI Agent/ \u2014 check that the vault is writable.",
   copyMessage: "Copy this message",
   copied: "Copied",
   copyFailed: "Copy failed",
@@ -1246,20 +1252,6 @@ async function copyText(text) {
     await navigator.clipboard.writeText(text);
     return true;
   } catch {
-  }
-  try {
-    const ta = document.createElement("textarea");
-    ta.value = text;
-    ta.setAttribute("readonly", "");
-    ta.style.position = "fixed";
-    ta.style.top = "-1000px";
-    ta.style.opacity = "0";
-    document.body.appendChild(ta);
-    ta.select();
-    const ok2 = document.execCommand("copy");
-    ta.remove();
-    return ok2;
-  } catch {
     return false;
   }
 }
@@ -1270,19 +1262,20 @@ function addCopyButton(parent, getText, labels) {
     btn.setAttribute("aria-label", text);
     btn.setAttribute("title", text);
   };
-  btn.addEventListener("click", async (e) => {
+  btn.addEventListener("click", (e) => {
     e.preventDefault();
     e.stopPropagation();
-    const ok2 = await copyText(getText());
-    (0, import_obsidian.setIcon)(btn, ok2 ? "check" : "x");
-    relabel(ok2 ? labels.copied : labels.failed);
-    btn.addClass(ok2 ? "va-copy-ok" : "va-copy-fail");
-    window.setTimeout(() => {
-      (0, import_obsidian.setIcon)(btn, "copy");
-      relabel(labels.copy);
-      btn.removeClass("va-copy-ok");
-      btn.removeClass("va-copy-fail");
-    }, 1200);
+    void copyText(getText()).then((ok2) => {
+      (0, import_obsidian.setIcon)(btn, ok2 ? "check" : "x");
+      relabel(ok2 ? labels.copied : labels.failed);
+      btn.addClass(ok2 ? "va-copy-ok" : "va-copy-fail");
+      window.setTimeout(() => {
+        (0, import_obsidian.setIcon)(btn, "copy");
+        relabel(labels.copy);
+        btn.removeClass("va-copy-ok");
+        btn.removeClass("va-copy-fail");
+      }, 1200);
+    });
   });
   return btn;
 }
@@ -1506,6 +1499,13 @@ var VaultToolExecutor = class {
 ---
 ` + truncate(text, MAX_READ);
   }
+  /**
+   * Create every missing parent folder of `path`, outermost first.
+   *
+   * The recursive call must pass the folder itself: passing a fake child
+   * (`dir + '/x'`) recomputed the same `dir` on every level and recursed until
+   * the stack overflowed, so no note could be created in a new subfolder.
+   */
   async ensureFolder(path) {
     const idx = path.lastIndexOf("/");
     if (idx <= 0)
@@ -1513,7 +1513,7 @@ var VaultToolExecutor = class {
     const dir = this.resolve(path.slice(0, idx));
     if (!dir || this.app.vault.getAbstractFileByPath(dir))
       return;
-    await this.ensureFolder(dir + "/x");
+    await this.ensureFolder(dir);
     if (!this.app.vault.getAbstractFileByPath(dir))
       await this.app.vault.createFolder(dir);
   }
@@ -2107,6 +2107,8 @@ var AgentView = class extends import_obsidian3.ItemView {
       this.stopBtn.disabled = true;
       this.sendBtn.disabled = false;
       void this.plugin.saveHistory(this.messages);
+      await this.plugin.history.flush();
+      void this.plugin.saveMemoryNote();
     }
   }
 };
@@ -2116,6 +2118,71 @@ function formatStamp(iso) {
     return "";
   const pad = (n) => String(n).padStart(2, "0");
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+// memory.ts
+var MEMORY_FOLDER = "CN AI Agent";
+function memoryPath(sessionId, firstMs) {
+  const date = new Date(firstMs);
+  const pad = (n) => String(n).padStart(2, "0");
+  const day = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+  const stamp = `${pad(date.getHours())}${pad(date.getMinutes())}`;
+  return `${MEMORY_FOLDER}/${day} ${stamp} ${sessionId.slice(0, 8)}.md`;
+}
+function yamlValue(value) {
+  const flat = value.replace(/\r?\n/g, " ").trim();
+  if (!flat)
+    return '""';
+  return /^[\w\u4e00-\u9fff][\w\u4e00-\u9fff .·\-/()（）]*$/.test(flat) && !/^(true|false|null|yes|no|on|off)$/i.test(flat) ? flat : JSON.stringify(flat);
+}
+function memoryTitle(events) {
+  const first = events.find((e) => e.type === "user" && e.content?.trim());
+  const text = (first?.content ?? "").replace(/\s+/g, " ").trim();
+  if (!text)
+    return "\uFF08\u65E0\u6807\u9898\u5BF9\u8BDD\uFF09";
+  return text.length > 40 ? text.slice(0, 40) + "\u2026" : text;
+}
+function renderMemoryNote(sessionId, events) {
+  const ordered = [...events].sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0));
+  const first = ordered[0];
+  const last = ordered[ordered.length - 1];
+  const turns = ordered.filter((e) => e.type === "user").length;
+  const iso = (ms) => ms ? new Date(ms).toISOString() : "";
+  const lines = [
+    "---",
+    `title: ${yamlValue(memoryTitle(ordered))}`,
+    `session: ${sessionId}`,
+    `agent: ${yamlValue(first?.agent ?? "")}`,
+    `provider: ${yamlValue(first?.provider ?? "")}`,
+    `model: ${yamlValue(first?.model ?? "")}`,
+    `created: ${iso(first?.ts)}`,
+    `updated: ${iso(last?.ts)}`,
+    `turns: ${turns}`,
+    "tags:",
+    "  - ai-chat",
+    "---",
+    "",
+    `# ${memoryTitle(ordered)}`,
+    "",
+    `> \u4F1A\u8BDD \`${sessionId}\` \xB7 ${turns} \u8F6E \xB7 ${first?.agent ?? "agent"} \xB7 ${first?.model ?? ""}`,
+    ""
+  ];
+  for (const event of ordered) {
+    if (event.type !== "user" && event.type !== "assistant")
+      continue;
+    const text = (event.content ?? "").trim();
+    if (!text)
+      continue;
+    const who = event.type === "user" ? "\u{1F9D1} \u6211" : "\u{1F916} \u667A\u80FD\u4F53";
+    const time = event.iso ? event.iso.slice(11, 16) : "";
+    lines.push(`## ${who}${time ? ` \xB7 ${time}` : ""}`, "");
+    lines.push(text, "");
+    const reasoning = (event.reasoning ?? "").trim();
+    if (reasoning) {
+      lines.push("> [!note]- \u601D\u8003\u8FC7\u7A0B", ...reasoning.split("\n").map((l) => `> ${l}`), "");
+    }
+  }
+  return lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
 }
 
 // magpie.ts
@@ -2255,7 +2322,7 @@ function reconcileProviderIds(profiles) {
 }
 function defaultSettings() {
   const profile = makeProfile("\u9ED8\u8BA4 Agent");
-  return { lang: "zh", profiles: [profile], activeProfileId: profile.id, history: [], sessionId: "" };
+  return { lang: "zh", profiles: [profile], activeProfileId: profile.id, history: [], sessionId: "", memoryNotes: true };
 }
 var VaultAgentPlugin = class extends import_obsidian4.Plugin {
   constructor() {
@@ -2265,6 +2332,8 @@ var VaultAgentPlugin = class extends import_obsidian4.Plugin {
     this.settingTab = null;
     /** Set once settings have been read successfully; guards against clobbering data.json. */
     this.loaded = false;
+    /** The memory-note failure notice is shown once per session, not per turn. */
+    this.memoryWarned = false;
   }
   /** The agent profile currently in use. */
   get profile() {
@@ -2457,7 +2526,8 @@ var VaultAgentPlugin = class extends import_obsidian4.Plugin {
           profiles,
           activeProfileId: active,
           history: Array.isArray(data.history) ? data.history : [],
-          sessionId: data.sessionId ?? ""
+          sessionId: data.sessionId ?? "",
+          memoryNotes: data.memoryNotes ?? true
         };
       } else if (data) {
         const lang = data.lang ?? "zh";
@@ -2486,7 +2556,8 @@ var VaultAgentPlugin = class extends import_obsidian4.Plugin {
           profiles: [profile],
           activeProfileId: profile.id,
           history: Array.isArray(data.history) ? data.history : [],
-          sessionId: data.sessionId ?? ""
+          sessionId: data.sessionId ?? "",
+          memoryNotes: data.memoryNotes ?? true
         };
         migrated = true;
       }
@@ -2544,6 +2615,48 @@ var VaultAgentPlugin = class extends import_obsidian4.Plugin {
     this.settings.sessionId = sessionId;
     this.recorder = this.newRecorder(sessionId, cursor);
     void this.saveSettings();
+  }
+  /**
+   * Rewrite the current session's memory note from `history.jsonl`.
+   *
+   * Called at the end of every turn rather than on unload: the note must be
+   * current even if Obsidian is quit abruptly, and one note per session means a
+   * rewrite is cheap and idempotent. Failures are reported once and then
+   * swallowed — a memory note is a convenience, never a reason to fail a turn.
+   */
+  async saveMemoryNote() {
+    if (!this.settings.memoryNotes)
+      return;
+    const session = this.settings.sessionId;
+    if (!session)
+      return;
+    try {
+      const events = parseHistory(await this.readHistoryText()).filter((e) => e.session === session);
+      if (!events.some((e) => e.type === "user" || e.type === "assistant"))
+        return;
+      const first = events.reduce((min, e) => Math.min(min, e.ts ?? 0), Number.MAX_SAFE_INTEGER);
+      const path = (0, import_obsidian4.normalizePath)(memoryPath(session, first));
+      await this.ensureFolder(MEMORY_FOLDER);
+      const text = renderMemoryNote(session, events);
+      const existing = this.app.vault.getAbstractFileByPath(path);
+      if (existing instanceof import_obsidian4.TFile)
+        await this.app.vault.modify(existing, text);
+      else
+        await this.app.vault.create(path, text);
+    } catch (e) {
+      if (!this.memoryWarned) {
+        this.memoryWarned = true;
+        console.error("[vault-agent] could not write the memory note", e);
+        new import_obsidian4.Notice(t(this.settings.lang, "memoryFailed"));
+      }
+    }
+  }
+  /** Create `CN AI Agent/` (and any parent) once; a no-op when it exists. */
+  async ensureFolder(path) {
+    const existing = this.app.vault.getAbstractFileByPath(path);
+    if (existing)
+      return;
+    await this.app.vault.createFolder(path).catch(() => void 0);
   }
   /** Raw `history.jsonl` text; empty string when nothing has been recorded yet. */
   async readHistoryText() {
@@ -2816,6 +2929,11 @@ var VASettingTab = class extends import_obsidian4.PluginSettingTab {
         control: { type: "toggle", key: "autoApprove" }
       },
       {
+        name: this.st("memoryNotes"),
+        desc: this.st("memoryNotesDesc"),
+        control: { type: "toggle", key: "memoryNotes" }
+      },
+      {
         name: this.st("systemPrompt"),
         desc: this.st("systemPromptDesc"),
         control: { type: "textarea", key: "systemPrompt", rows: 4 }
@@ -2883,11 +3001,16 @@ var VASettingTab = class extends import_obsidian4.PluginSettingTab {
     ];
   }
   getControlValue(key) {
-    if (key === "lang")
-      return this.plugin.settings.lang;
+    if (key === "lang" || key === "memoryNotes")
+      return this.plugin.settings[key];
     return this.profile[key];
   }
   async setControlValue(key, value) {
+    if (key === "memoryNotes") {
+      this.plugin.settings.memoryNotes = value === true;
+      await this.plugin.saveSettings();
+      return;
+    }
     if (key === "lang") {
       this.plugin.settings.lang = value;
       await this.plugin.saveSettings();
@@ -2984,6 +3107,10 @@ var VASettingTab = class extends import_obsidian4.PluginSettingTab {
     }));
     new import_obsidian4.Setting(containerEl).setName(this.st("autoApprove")).setDesc(this.st("autoApproveDesc")).addToggle((tg) => tg.setValue(s.autoApprove).onChange(async (v) => {
       s.autoApprove = v;
+      await this.plugin.saveSettings();
+    }));
+    new import_obsidian4.Setting(containerEl).setName(this.st("memoryNotes")).setDesc(this.st("memoryNotesDesc")).addToggle((tg) => tg.setValue(this.plugin.settings.memoryNotes).onChange(async (v) => {
+      this.plugin.settings.memoryNotes = v;
       await this.plugin.saveSettings();
     }));
     new import_obsidian4.Setting(containerEl).setName(this.st("systemPrompt")).setDesc(this.st("systemPromptDesc")).addTextArea((ta) => ta.setValue(s.systemPrompt).onChange(async (v) => {

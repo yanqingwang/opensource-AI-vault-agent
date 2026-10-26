@@ -10,7 +10,7 @@
 
 中文优先的 Obsidian vault 智能体插件（插件市场名 **AI Vault Agent CN**）——直连国产大模型 API（OpenAI 兼容协议 + Anthropic Messages 协议），智能体可自主**搜索、读取、创建、修改**你的笔记。无需安装任何 CLI，无需海外账号，无需配置环境变量。可配置**多个 Agent**（各自的服务商、Key、提示词），在标题栏一键切换。
 
-**当前版本：v0.3.0**
+**当前版本：v0.3.1**
 
 ## 为什么做这个
 
@@ -46,6 +46,7 @@
 - **Anthropic Messages 协议**：除 OpenAI 兼容协议外，支持 Anthropic Messages（`POST /v1/messages`），可直接接入火山方舟 Coding Plan 等 Anthropic 兼容端点。
 - **Magpie 本地网关（一键模板）**：设置里点一下就用 Magpie 网关建好 Agent，模型列表从网关 `/v1/models` 实时读取，不用手抄模型名。
 - **消息可复制**：每条用户消息与回答右上角都有复制按钮（悬停出现），点击即复制该条消息的纯文本/Markdown，图标短暂变成 ✓。
+- **对话即记忆**：每轮对话结束后自动写入库内 `CN AI Agent/` 文件夹的一篇笔记（同一会话更新同一篇），对话因此可搜索、可双链、可被其他笔记引用。
 
 ## 多 Agent 与火山方舟 Coding Plan
 
@@ -82,6 +83,20 @@
 - **Key 不是密钥**。本机网关接受任意 Key，`magpie-ai-vault-agent` 只是让 Magpie 的用量统计和路由规则把你这个客户端记成 `ai-vault-agent`。切到别的服务商时插件会自动清掉它，避免被当成真 Key 误用。
 - **端口可改**。Magpie 的 `settings.json` 里改了 `port`，把 Base URL 一起改掉即可；也支持 Magpie 的「共享到局域网」地址。
 - 模型名就是 Magpie 的 `provider/model`（或路由组名），以 `/v1/models` 返回为准，本插件不内置任何固定列表。
+
+## 对话记忆（CN AI Agent 文件夹）
+
+开启（默认开启，设置 → AI Vault Agent CN → **把对话保存为库内记忆**）后，**每轮对话结束**都会把当前会话写成库里的一篇笔记：
+
+```
+CN AI Agent/2026-10-27 1405 abcd1234.md
+```
+
+- 一篇会话一篇笔记，文件名 = 开始日期 + 开始时刻 + 会话 id 前 8 位；同一会话后续轮次**更新同一篇**，不会刷出一堆文件。
+- 正文是普通 Markdown：frontmatter（title/session/agent/provider/model/created/updated/turns/tags）+ 按时间排列的 `## 🧑 我` / `## 🤖 智能体` 小节。
+- 模型的**思考过程**放在折叠的 callout 里（`> [!note]- 思考过程`），不干扰正文阅读。
+- 工具调用与工具结果**不写入**笔记——那是聊天内部细节，写进去会淹没对话本身；完整事件仍在 `history.jsonl`。
+- 关掉这个开关就完全恢复旧行为（只留 `data.json` + `history.jsonl`）。
 
 ## 安装
 

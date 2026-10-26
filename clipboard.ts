@@ -3,29 +3,15 @@ import { setIcon } from 'obsidian';
 /**
  * Copy text from a chat bubble.
  *
- * Obsidian's renderer is a secure context, so `navigator.clipboard` is normally
- * available; the textarea fallback covers the cases where it is not (an older
- * Electron build, or a document that lost focus).
+ * Obsidian's renderer is a secure context (`app://obsidian.md`), so the async
+ * clipboard API is always available; there is no `execCommand` fallback because
+ * that path is deprecated and needs an off-screen textarea positioned with
+ * inline styles.
  */
 export async function copyText(text: string): Promise<boolean> {
 	try {
 		await navigator.clipboard.writeText(text);
 		return true;
-	} catch {
-		// fall through to the legacy path
-	}
-	try {
-		const ta = document.createElement('textarea');
-		ta.value = text;
-		ta.setAttribute('readonly', '');
-		ta.style.position = 'fixed';
-		ta.style.top = '-1000px';
-		ta.style.opacity = '0';
-		document.body.appendChild(ta);
-		ta.select();
-		const ok = document.execCommand('copy');
-		ta.remove();
-		return ok;
 	} catch {
 		return false;
 	}
@@ -48,19 +34,20 @@ export function addCopyButton(
 		btn.setAttribute('aria-label', text);
 		btn.setAttribute('title', text);
 	};
-	btn.addEventListener('click', async (e) => {
+	btn.addEventListener('click', (e) => {
 		e.preventDefault();
 		e.stopPropagation();
-		const ok = await copyText(getText());
-		setIcon(btn, ok ? 'check' : 'x');
-		relabel(ok ? labels.copied : labels.failed);
-		btn.addClass(ok ? 'va-copy-ok' : 'va-copy-fail');
-		window.setTimeout(() => {
-			setIcon(btn, 'copy');
-			relabel(labels.copy);
-			btn.removeClass('va-copy-ok');
-			btn.removeClass('va-copy-fail');
-		}, 1200);
+		void copyText(getText()).then(ok => {
+			setIcon(btn, ok ? 'check' : 'x');
+			relabel(ok ? labels.copied : labels.failed);
+			btn.addClass(ok ? 'va-copy-ok' : 'va-copy-fail');
+			window.setTimeout(() => {
+				setIcon(btn, 'copy');
+				relabel(labels.copy);
+				btn.removeClass('va-copy-ok');
+				btn.removeClass('va-copy-fail');
+			}, 1200);
+		});
 	});
 	return btn;
 }

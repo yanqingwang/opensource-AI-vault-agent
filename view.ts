@@ -51,9 +51,13 @@ export class AgentView extends ItemView {
 
 	private st(key: Parameters<typeof t>[1]): string { return t(this.plugin.lang, key); }
 
-	/** Header label: the active agent's name plus the model it will call. */
-	private brandLabel(): string {
-		return this.plugin.profile.name + ' · ' + this.plugin.currentModelLabel();
+	/**
+	 * Header label: the active agent's name, with the model as a separate span.
+	 * Kept apart so a narrow sidebar truncates the model (`…`) instead of cutting
+	 * the agent name in the middle — the name is what the reader needs to see.
+	 */
+	private brandLabel(): { agent: string; model: string } {
+		return { agent: this.plugin.profile.name, model: this.plugin.currentModelLabel() };
 	}
 
 	/** Anchor for the agent-switcher menu when opened from the command palette. */
@@ -63,7 +67,10 @@ export class AgentView extends ItemView {
 
 	/** The active agent changed (from the header menu or the settings tab). */
 	onProfileSwitched(): void {
-		this.brandEl?.setText(this.brandLabel());
+		const { agent, model } = this.brandLabel();
+		if (!this.brandEl) return;
+		this.brandEl.setText(agent);
+		if (this.modelEl) this.modelEl.setText(model);
 	}
 
 	private renderShell(): void {
@@ -74,7 +81,9 @@ export class AgentView extends ItemView {
 		const header = root.createDiv({ cls: 'va-header' });
 		const brand = header.createDiv({ cls: 'va-brand' });
 		setIcon(brand, 'bot-message-square');
-		this.brandEl = brand.createSpan({ text: this.brandLabel() });
+		const label = this.brandLabel();
+		this.brandEl = brand.createSpan({ cls: 'va-brand-name', text: label.agent });
+		this.modelEl = brand.createSpan({ cls: 'va-brand-model', text: label.model });
 		const actions = header.createDiv({ cls: 'va-header-actions' });
 		this.switchBtn = actions.createEl('button', { cls: 'va-icon-btn', attr: { 'aria-label': this.st('switchAgent'), title: this.st('switchAgent') } });
 		setIcon(this.switchBtn, 'chevrons-up-down');
@@ -128,6 +137,7 @@ export class AgentView extends ItemView {
 
 	private msgsEl!: HTMLElement;
 	private brandEl: HTMLElement | null = null;
+	private modelEl: HTMLElement | null = null;
 	private switchBtn: HTMLButtonElement | null = null;
 	private historyEl!: HTMLElement;
 	private inputAreaEl!: HTMLElement;

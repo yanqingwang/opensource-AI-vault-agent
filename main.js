@@ -1603,6 +1603,7 @@ var AgentView = class extends import_obsidian3.ItemView {
     this.running = false;
     this.abort = null;
     this.brandEl = null;
+    this.modelEl = null;
     this.switchBtn = null;
     /** Raw history.jsonl, cached while the history panel is open. */
     this.historyText = "";
@@ -1642,9 +1643,13 @@ var AgentView = class extends import_obsidian3.ItemView {
   st(key) {
     return t(this.plugin.lang, key);
   }
-  /** Header label: the active agent's name plus the model it will call. */
+  /**
+   * Header label: the active agent's name, with the model as a separate span.
+   * Kept apart so a narrow sidebar truncates the model (`…`) instead of cutting
+   * the agent name in the middle — the name is what the reader needs to see.
+   */
   brandLabel() {
-    return this.plugin.profile.name + " \xB7 " + this.plugin.currentModelLabel();
+    return { agent: this.plugin.profile.name, model: this.plugin.currentModelLabel() };
   }
   /** Anchor for the agent-switcher menu when opened from the command palette. */
   getSwitcherAnchor() {
@@ -1652,7 +1657,12 @@ var AgentView = class extends import_obsidian3.ItemView {
   }
   /** The active agent changed (from the header menu or the settings tab). */
   onProfileSwitched() {
-    this.brandEl?.setText(this.brandLabel());
+    const { agent, model } = this.brandLabel();
+    if (!this.brandEl)
+      return;
+    this.brandEl.setText(agent);
+    if (this.modelEl)
+      this.modelEl.setText(model);
   }
   renderShell() {
     const root = this.contentEl;
@@ -1661,7 +1671,9 @@ var AgentView = class extends import_obsidian3.ItemView {
     const header = root.createDiv({ cls: "va-header" });
     const brand = header.createDiv({ cls: "va-brand" });
     (0, import_obsidian3.setIcon)(brand, "bot-message-square");
-    this.brandEl = brand.createSpan({ text: this.brandLabel() });
+    const label = this.brandLabel();
+    this.brandEl = brand.createSpan({ cls: "va-brand-name", text: label.agent });
+    this.modelEl = brand.createSpan({ cls: "va-brand-model", text: label.model });
     const actions = header.createDiv({ cls: "va-header-actions" });
     this.switchBtn = actions.createEl("button", { cls: "va-icon-btn", attr: { "aria-label": this.st("switchAgent"), title: this.st("switchAgent") } });
     (0, import_obsidian3.setIcon)(this.switchBtn, "chevrons-up-down");

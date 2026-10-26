@@ -42,7 +42,23 @@
   min-width: 0;
 }
 .va-brand .svg-icon { flex: 0 0 auto; }
-.va-brand span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The agent name is what identifies the panel, so it keeps its space; the model
+   id is the part that gives way when the sidebar is narrow. */
+.va-brand-name {
+  flex: 0 0 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.va-brand-model {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-weight: 400;
+}
 .va-header-actions { display: flex; gap: 4px; }
 .va-icon-btn {
   background: none;
@@ -369,8 +385,24 @@
 .va-chip-status { font-size: var(--font-ui-smaller); color: var(--text-faint); }
 
 /* Multi-agent manager */
-.va-agents-setting .setting-item-info { margin-bottom: 6px; }
-.va-agents-setting .setting-item-control { justify-content: flex-start; }
+/* The agent roster is a list, not a one-line setting. Its control holds a
+   full-width list, and in Obsidian's flex row that squeezed the label down to a
+   few pixels (the Chinese label wrapped one character per line). Stack it, the
+   same way the model row is stacked. */
+.va-agents-setting {
+  flex-direction: column;
+  align-items: stretch;
+  flex-wrap: nowrap;
+}
+.va-agents-setting .setting-item-info {
+  width: 100%;
+  margin-bottom: 6px;
+}
+.va-agents-setting .setting-item-control {
+  width: 100%;
+  flex: 1 1 auto;
+  justify-content: flex-start;
+}
 .va-agents { display: flex; flex-direction: column; gap: 6px; width: 100%; }
 .va-agent-row {
   display: flex;

@@ -3,7 +3,10 @@ import { AgentView, VIEW_TYPE_AGENT } from './view';
 import { HistoryRecorder, newSessionId, parseHistory, type HistoryMeta, type SessionCursor } from './history';
 import { nativeSearchFor, withTimeout, type SearchDepth, type SearchMode } from './search';
 import { t, tf, Lang } from './i18n';
-import { MEMORY_FOLDER, memoryPath, renderMemoryNote } from './memory';
+import {
+	MEMORY_FILE, MEMORY_FOLDER, dueEntries, markForgotten, markReviewed,
+	mergeSession, parseMemoryFile, renderMemoryFile, type MemoryEntry
+} from './memory';
 import { MAGPIE_BASE_URL, MAGPIE_KEY, magpieModelsUrl, parseMagpieModels, pickDefaultMagpieModel, type MagpieModel } from './magpie';
 
 /** Wire protocol a provider speaks. Coding Plan (and Anthropic itself) use 'anthropic'. */
@@ -217,8 +220,11 @@ export default class VaultAgentPlugin extends Plugin {
 		this.addRibbonIcon('bot-message-square', t(this.settings.lang, 'viewName'), () => void this.revealAgent());
 		this.addCommand({ id: 'open-agent', name: '打开智能体 / open agent', callback: () => void this.revealAgent() });
 		this.addCommand({ id: 'switch-agent', name: '切换智能体 / switch agent', callback: () => this.openAgentSwitcher() });
+		this.addCommand({ id: 'open-memory', name: '打开记忆文件 / open memory note', callback: () => void this.openMemoryNote() });
+		this.addCommand({ id: 'review-memory', name: '复习今日记忆 / review due memory', callback: () => void this.openMemoryReview() });
 		this.settingTab = new VASettingTab(this.app, this);
 		this.addSettingTab(this.settingTab);
+		this.app.workspace.onLayoutReady(() => this.notifyDueMemory());
 	}
 
 	onunload(): void {
@@ -241,6 +247,52 @@ export default class VaultAgentPlugin extends Plugin {
 		const setting = (this.app as unknown as { setting: { open(): void; openTabById(id: string): void } }).setting;
 		setting.open();
 		setting.openTabById(this.manifest.id);
+	}
+
+	/** Open `CN AI Agent/记忆.md`, creating it when it does not exist yet. */
+	async openMemoryNote(): Promise<void> {
+		if (!this.app.vault.getAbstractFileByPath(MEMORY_FILE)) {
+			await this.writeMemoryFile(await this.readMemoryEntries(), Date.now()).catch(e => this.warnMemoryFailure(e));
+		}
+		const file = this.app.vault.getAbstractFileByPath(MEMORY_FILE);
+		if (file instanceof TFile) await this.app.workspace.getLeaf(false).openFile(file);
+	}
+
+	/**
+	 * Ask whether the due memories were recalled, then reschedule them: recalled
+	 * climbs the ladder, forgotten drops back to the first rung.
+	 */
+	async openMemoryReview(): Promise<void> {
+		const due = dueEntries(await this.readMemoryEntries(), Date.now());
+		if (!due.length) {
+			new Notice(t(this.settings.lang, 'memoryNothingDue'));
+			return;
+		}
+		const lang = this.settings.lang;
+		new ConfirmModal(
+			this.app,
+			[tf(lang, 'memoryReviewTitle', { n: due.length }), ...due.map(e => '· ' + e.title)],
+			{ cancel: t(lang, 'memoryForgotten'), confirm: t(lang, 'memoryRecalled') },
+			() => void this.finishMemoryReview(true),
+			() => void this.finishMemoryReview(false)
+		).open();
+	}
+
+	private async finishMemoryReview(recalled: boolean): Promise<void> {
+		const { reviewed, remaining } = await this.reviewDueMemory(recalled).catch(e => {
+			this.warnMemoryFailure(e);
+			return { reviewed: 0, remaining: 0 };
+		});
+		if (reviewed) new Notice(tf(this.settings.lang, 'memoryReviewed', { n: reviewed, left: remaining }));
+	}
+
+	/** On start-up, say once how many memories are due today. */
+	private notifyDueMemory(): void {
+		if (!this.settings.memoryNotes) return;
+		void this.readMemoryEntries().then(entries => {
+			const due = dueEntries(entries, Date.now());
+			if (due.length) new Notice(tf(this.settings.lang, 'memoryDueToday', { n: due.length }), 8000);
+		}).catch(() => undefined);
 	}
 
 	currentModelLabel(): string {
@@ -513,12 +565,12 @@ export default class VaultAgentPlugin extends Plugin {
 	}
 
 	/**
-	 * Rewrite the current session's memory note from `history.jsonl`.
+	 * Fold the current session into the single memory note.
 	 *
-	 * Called at the end of every turn rather than on unload: the note must be
-	 * current even if Obsidian is quit abruptly, and one note per session means a
-	 * rewrite is cheap and idempotent. Failures are reported once and then
-	 * swallowed — a memory note is a convenience, never a reason to fail a turn.
+	 * Called at the end of every turn: the note must be current even if Obsidian
+	 * is quit abruptly, and rewriting one file is cheap and idempotent. Existing
+	 * entries are preserved — including their review schedule — so this only ever
+	 * adds or refreshes the entry for the active session.
 	 */
 	async saveMemoryNote(): Promise<void> {
 		if (!this.settings.memoryNotes) return;
@@ -527,20 +579,54 @@ export default class VaultAgentPlugin extends Plugin {
 		try {
 			const events = parseHistory(await this.readHistoryText()).filter(e => e.session === session);
 			if (!events.some(e => e.type === 'user' || e.type === 'assistant')) return;
-			const first = events.reduce((min, e) => Math.min(min, e.ts ?? 0), Number.MAX_SAFE_INTEGER);
-			const path = normalizePath(memoryPath(session, first));
-			await this.ensureFolder(MEMORY_FOLDER);
-			const text = renderMemoryNote(session, events);
-			const existing = this.app.vault.getAbstractFileByPath(path);
-			if (existing instanceof TFile) await this.app.vault.modify(existing, text);
-			else await this.app.vault.create(path, text);
+			const now = Date.now();
+			const entries = mergeSession(await this.readMemoryEntries(), events, now);
+			await this.writeMemoryFile(entries, now);
 		} catch (e: unknown) {
-			if (!this.memoryWarned) {
-				this.memoryWarned = true;
-				console.error('[vault-agent] could not write the memory note', e);
-				new Notice(t(this.settings.lang, 'memoryFailed'));
-			}
+			this.warnMemoryFailure(e);
 		}
+	}
+
+	/** Every memory entry currently stored in the note. */
+	async readMemoryEntries(): Promise<MemoryEntry[]> {
+		const file = this.app.vault.getAbstractFileByPath(MEMORY_FILE);
+		if (!(file instanceof TFile)) return [];
+		return parseMemoryFile(await this.app.vault.cachedRead(file));
+	}
+
+	/**
+	 * Review the memory that is due now. Returns how many entries were handled,
+	 * so the caller can tell the user what happened.
+	 */
+	async reviewDueMemory(recalled: boolean): Promise<{ reviewed: number; remaining: number }> {
+		const now = Date.now();
+		const entries = await this.readMemoryEntries();
+		const due = dueEntries(entries, now);
+		if (!due.length) return { reviewed: 0, remaining: 0 };
+		const ids = new Set(due.map(e => e.session));
+		const next = entries.map(e => {
+			if (!ids.has(e.session)) return e;
+			return recalled ? markReviewed(e, now) : markForgotten(e, now);
+		});
+		await this.writeMemoryFile(next, now);
+		return { reviewed: due.length, remaining: dueEntries(next, now).length };
+	}
+
+	/** Rewrite the note from `entries`; creates the folder and file when missing. */
+	private async writeMemoryFile(entries: MemoryEntry[], now: number): Promise<void> {
+		await this.ensureFolder(MEMORY_FOLDER);
+		const text = renderMemoryFile(entries, now);
+		const existing = this.app.vault.getAbstractFileByPath(MEMORY_FILE);
+		if (existing instanceof TFile) await this.app.vault.modify(existing, text);
+		else await this.app.vault.create(MEMORY_FILE, text);
+	}
+
+	/** A memory note is a convenience: report the first failure, never fail a turn. */
+	private warnMemoryFailure(e: unknown): void {
+		if (this.memoryWarned) return;
+		this.memoryWarned = true;
+		console.error('[vault-agent] could not write the memory note', e);
+		new Notice(t(this.settings.lang, 'memoryFailed'));
 	}
 
 	/** Create `CN AI Agent/` (and any parent) once; a no-op when it exists. */
@@ -580,7 +666,8 @@ class ConfirmModal extends Modal {
 		app: App,
 		private lines: string[],
 		private labels: { cancel: string; confirm: string },
-		private onConfirm: () => void
+		private onConfirm: () => void,
+		private onCancel?: () => void
 	) {
 		super(app);
 	}
@@ -589,7 +676,10 @@ class ConfirmModal extends Modal {
 		for (const line of this.lines) this.contentEl.createEl('p', { text: line });
 		const buttons = this.contentEl.createDiv({ cls: 'va-confirm-buttons' });
 		buttons.createEl('button', { text: this.labels.cancel })
-			.addEventListener('click', () => this.close());
+			.addEventListener('click', () => {
+				this.close();
+				this.onCancel?.();
+			});
 		buttons.createEl('button', { cls: 'mod-cta', text: this.labels.confirm })
 			.addEventListener('click', () => {
 				this.close();

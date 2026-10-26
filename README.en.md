@@ -40,7 +40,7 @@ The closest equivalent overseas ([Claudian](https://github.com/yishentu/claudian
 - **Anthropic Messages protocol**: alongside the OpenAI-compatible protocol, Anthropic Messages (`POST /v1/messages`) is supported, so Anthropic-compatible endpoints such as Volcengine Ark's Coding Plan work directly.
 - **Magpie gateway (one-click template)**: one button creates an agent wired to the Magpie gateway, and the model list is read live from its `/v1/models` instead of being typed by hand.
 - **Copyable messages**: every user message and answer carries a copy button (shown on hover); clicking it copies that message as plain text/Markdown and flips the icon to a check.
-- **Conversations are memory**: after every turn the session is written to a note under `CN AI Agent/`, so a conversation is searchable, linkable and referenceable from other notes.
+- **Conversations are memory**: every turn updates the single note `CN AI Agent/记忆.md` and schedules it on a forgetting curve, so a conversation is searchable, linkable and actually comes back for review.
 
 ## Multiple agents and Volcengine Ark Coding Plan
 
@@ -78,19 +78,21 @@ Boundaries worth knowing:
 - **The port can move.** If you change `port` in Magpie's `settings.json`, change the base URL to match; Magpie's "share on the local network" address works too.
 - Model ids are Magpie's `provider/model` (or a routing group name) exactly as `/v1/models` returns them; this plugin ships no fixed list.
 
-## Conversation memory (the CN AI Agent folder)
+## Conversation memory (CN AI Agent/记忆.md)
 
-With **Save conversations as vault memory** on (the default), every turn ends by writing the current session to a note in the vault:
+With **Save conversations as vault memory** on (the default), every turn updates **one** memory note:
 
 ```
-CN AI Agent/2026-10-27 1405 abcd1234.md
+CN AI Agent/记忆.md
 ```
 
-- One note per session: the filename is the start date, start time and the first 8 characters of the session id. Later turns **update the same note** instead of creating more files.
-- The body is ordinary Markdown: frontmatter (title/session/agent/provider/model/created/updated/turns/tags) plus chronological `## 🧑 我` / `## 🤖 智能体` sections.
-- The model's **reasoning** goes into a collapsed callout (`> [!note]- 思考过程`) so it does not get in the way of the answer.
-- Tool calls and results are **not** written: that is chat plumbing, and it would drown the conversation. The full event log stays in `history.jsonl`.
-- Turning the switch off restores the old behaviour (`data.json` plus `history.jsonl` only).
+Not one file per conversation — that only piles up files nobody reopens. Every memory lives in this one note, each with its own review schedule, so the note itself says what to review today.
+
+- **Scheduled on a forgetting curve**: a new memory is due the next day, then every 1 / 2 / 4 / 7 / 15 / 30 / 60 / 120 / 240 days. "Remembered" climbs a rung; "Forgot" drops back to day one.
+- **Two ways in**: the "Review due memory" command walks the due entries; the note's `## 今日待复习` section lists them. On start-up the plugin mentions how many are due.
+- **What the note holds**: frontmatter (updated/entries/due/tags), the due list, then every memory with its session, turn count, next review date, review count, a memory-strength percentage and the question/answer pairs.
+- **The prose is safe to edit by hand**; the trailing `<!-- memory:data -->` comment is the schedule, and editing it loses review progress.
+- Turning the switch off stops all writes.
 
 ## Installation
 

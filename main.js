@@ -1043,8 +1043,14 @@ var zh = {
   magpieUnreachable: "\u8FDE\u4E0D\u4E0A Magpie \u7F51\u5173\uFF08{url}\uFF09\u3002\u8BF7\u786E\u8BA4 Magpie \u5DF2\u542F\u52A8\uFF0C\u6216\u628A Base URL \u6539\u6210\u7F51\u5173\u5B9E\u9645\u7AEF\u53E3\u3002",
   magpieModelPicked: "Magpie Agent \u5DF2\u521B\u5EFA\uFF0C\u6A21\u578B\uFF1A{model}",
   memoryNotes: "\u628A\u5BF9\u8BDD\u4FDD\u5B58\u4E3A\u5E93\u5185\u8BB0\u5FC6",
-  memoryNotesDesc: "\u6BCF\u8F6E\u5BF9\u8BDD\u7ED3\u675F\u540E\uFF0C\u628A\u5F53\u524D\u4F1A\u8BDD\u5199\u6210 CN AI Agent/ \u6587\u4EF6\u5939\u4E0B\u7684\u4E00\u7BC7\u7B14\u8BB0\uFF08\u540C\u4E00\u4F1A\u8BDD\u6301\u7EED\u66F4\u65B0\u540C\u4E00\u7BC7\uFF09\u3002",
-  memoryFailed: "\u65E0\u6CD5\u5199\u5165 CN AI Agent/ \u8BB0\u5FC6\u7B14\u8BB0\uFF0C\u8BF7\u68C0\u67E5\u5E93\u7684\u5199\u5165\u6743\u9650\u3002",
+  memoryNotesDesc: "\u6BCF\u8F6E\u5BF9\u8BDD\u7ED3\u675F\u540E\u66F4\u65B0 CN AI Agent/\u8BB0\u5FC6.md\uFF0C\u5E76\u6309\u9057\u5FD8\u66F2\u7EBF\uFF081/2/4/7/15/30/60/120/240 \u5929\uFF09\u5B89\u6392\u590D\u4E60\u3002",
+  memoryFailed: "\u65E0\u6CD5\u5199\u5165 CN AI Agent/\u8BB0\u5FC6.md\uFF0C\u8BF7\u68C0\u67E5\u5E93\u7684\u5199\u5165\u6743\u9650\u3002",
+  memoryReviewTitle: "\u4ECA\u5929\u6709 {n} \u6761\u8BB0\u5FC6\u5230\u671F\uFF0C\u8FD8\u8BB0\u5F97\u5B83\u4EEC\u5417\uFF1F",
+  memoryRecalled: "\u8BB0\u5F97",
+  memoryForgotten: "\u5FD8\u4E86",
+  memoryReviewed: "\u5DF2\u66F4\u65B0 {n} \u6761\u8BB0\u5FC6\uFF0C\u8FD8\u6709 {left} \u6761\u5F85\u590D\u4E60\u3002",
+  memoryNothingDue: "\u4ECA\u5929\u6CA1\u6709\u5230\u671F\u7684\u8BB0\u5FC6\u3002",
+  memoryDueToday: "\u4ECA\u5929\u6709 {n} \u6761\u8BB0\u5FC6\u5F85\u590D\u4E60\uFF1A\u547D\u4EE4\u9762\u677F\u300C\u590D\u4E60\u4ECA\u65E5\u8BB0\u5FC6\u300D\u3002",
   copyMessage: "\u590D\u5236\u8FD9\u6761\u6D88\u606F",
   copied: "\u5DF2\u590D\u5236",
   copyFailed: "\u590D\u5236\u5931\u8D25",
@@ -1151,8 +1157,14 @@ var en = {
   magpieUnreachable: "Cannot reach the Magpie gateway ({url}). Check that Magpie is running, or point Base URL at its actual port.",
   magpieModelPicked: "Magpie agent created, model: {model}",
   memoryNotes: "Save conversations as vault memory",
-  memoryNotesDesc: "After every turn, write the current session to a note under CN AI Agent/ (the same note is updated for the same session).",
-  memoryFailed: "Could not write the memory note under CN AI Agent/ \u2014 check that the vault is writable.",
+  memoryNotesDesc: "After every turn, update CN AI Agent/\u8BB0\u5FC6.md and schedule reviews on a forgetting curve (1/2/4/7/15/30/60/120/240 days).",
+  memoryFailed: "Could not write CN AI Agent/\u8BB0\u5FC6.md \u2014 check that the vault is writable.",
+  memoryReviewTitle: "{n} memories are due today \u2014 do you still remember them?",
+  memoryRecalled: "Remembered",
+  memoryForgotten: "Forgot",
+  memoryReviewed: "Updated {n} memories, {left} still due.",
+  memoryNothingDue: "Nothing is due for review today.",
+  memoryDueToday: '{n} memories are due today \u2014 run "Review due memory" from the command palette.',
   copyMessage: "Copy this message",
   copied: "Copied",
   copyFailed: "Copy failed",
@@ -2116,72 +2128,220 @@ function formatStamp(iso) {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime()))
     return "";
-  const pad = (n) => String(n).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  const pad2 = (n) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())} ${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
 }
 
 // memory.ts
 var MEMORY_FOLDER = "CN AI Agent";
-function memoryPath(sessionId, firstMs) {
-  const date = new Date(firstMs);
-  const pad = (n) => String(n).padStart(2, "0");
-  const day = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
-  const stamp = `${pad(date.getHours())}${pad(date.getMinutes())}`;
-  return `${MEMORY_FOLDER}/${day} ${stamp} ${sessionId.slice(0, 8)}.md`;
+var MEMORY_FILE = `${MEMORY_FOLDER}/\u8BB0\u5FC6.md`;
+var REVIEW_LADDER_DAYS = [1, 2, 4, 7, 15, 30, 60, 120, 240];
+var DAY_MS = 864e5;
+var DECAY = -Math.log(0.9);
+function intervalDays(reviews) {
+  const ladder = REVIEW_LADDER_DAYS;
+  const index = Math.min(Math.max(Math.floor(reviews), 0), ladder.length - 1);
+  return ladder[index];
 }
-function yamlValue(value) {
-  const flat = value.replace(/\r?\n/g, " ").trim();
-  if (!flat)
-    return '""';
-  return /^[\w\u4e00-\u9fff][\w\u4e00-\u9fff .·\-/()（）]*$/.test(flat) && !/^(true|false|null|yes|no|on|off)$/i.test(flat) ? flat : JSON.stringify(flat);
+function retention(entry, now) {
+  const since = Math.max(0, now - (entry.lastReviewed || entry.updated || entry.created));
+  const stability = intervalDays(entry.reviews) * DAY_MS / DECAY;
+  return Math.exp(-since / stability);
 }
-function memoryTitle(events) {
-  const first = events.find((e) => e.type === "user" && e.content?.trim());
-  const text = (first?.content ?? "").replace(/\s+/g, " ").trim();
-  if (!text)
-    return "\uFF08\u65E0\u6807\u9898\u5BF9\u8BDD\uFF09";
-  return text.length > 40 ? text.slice(0, 40) + "\u2026" : text;
+function dueEntries(entries, now) {
+  return entries.filter((e) => (e.nextReview || 0) <= now).sort((a, b) => (a.nextReview || 0) - (b.nextReview || 0));
 }
-function renderMemoryNote(sessionId, events) {
+function markReviewed(entry, now) {
+  const reviews = Math.max(0, entry.reviews) + 1;
+  return {
+    ...entry,
+    reviews,
+    lastReviewed: now,
+    nextReview: now + intervalDays(reviews) * DAY_MS
+  };
+}
+function markForgotten(entry, now) {
+  return {
+    ...entry,
+    reviews: 0,
+    lastReviewed: now,
+    nextReview: now + intervalDays(0) * DAY_MS
+  };
+}
+function clip(text, max) {
+  const flat = text.replace(/\s+/g, " ").trim();
+  if (flat.length <= max)
+    return flat;
+  return flat.slice(0, max).trimEnd() + "\u2026";
+}
+function sessionPoints(events, limit = 12) {
   const ordered = [...events].sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0));
-  const first = ordered[0];
-  const last = ordered[ordered.length - 1];
-  const turns = ordered.filter((e) => e.type === "user").length;
-  const iso = (ms) => ms ? new Date(ms).toISOString() : "";
-  const lines = [
-    "---",
-    `title: ${yamlValue(memoryTitle(ordered))}`,
-    `session: ${sessionId}`,
-    `agent: ${yamlValue(first?.agent ?? "")}`,
-    `provider: ${yamlValue(first?.provider ?? "")}`,
-    `model: ${yamlValue(first?.model ?? "")}`,
-    `created: ${iso(first?.ts)}`,
-    `updated: ${iso(last?.ts)}`,
-    `turns: ${turns}`,
-    "tags:",
-    "  - ai-chat",
-    "---",
-    "",
-    `# ${memoryTitle(ordered)}`,
-    "",
-    `> \u4F1A\u8BDD \`${sessionId}\` \xB7 ${turns} \u8F6E \xB7 ${first?.agent ?? "agent"} \xB7 ${first?.model ?? ""}`,
-    ""
-  ];
+  const points = [];
   for (const event of ordered) {
-    if (event.type !== "user" && event.type !== "assistant")
-      continue;
-    const text = (event.content ?? "").trim();
-    if (!text)
-      continue;
-    const who = event.type === "user" ? "\u{1F9D1} \u6211" : "\u{1F916} \u667A\u80FD\u4F53";
-    const time = event.iso ? event.iso.slice(11, 16) : "";
-    lines.push(`## ${who}${time ? ` \xB7 ${time}` : ""}`, "");
-    lines.push(text, "");
-    const reasoning = (event.reasoning ?? "").trim();
-    if (reasoning) {
-      lines.push("> [!note]- \u601D\u8003\u8FC7\u7A0B", ...reasoning.split("\n").map((l) => `> ${l}`), "");
+    if (event.type === "user") {
+      const q = clip(event.content ?? "", 200);
+      if (q)
+        points.push({ q, a: "" });
+      if (points.length >= limit)
+        break;
+    } else if (event.type === "assistant") {
+      const last = points[points.length - 1];
+      if (last && !last.a)
+        last.a = clip(event.content ?? "", 400);
     }
   }
+  return points;
+}
+function memoryTitle(events) {
+  const first = [...events].sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0)).find((e) => e.type === "user" && e.content?.trim());
+  return clip(first?.content ?? "", 40) || "\uFF08\u65E0\u6807\u9898\u5BF9\u8BDD\uFF09";
+}
+function mergeSession(entries, events, now) {
+  if (!events.length)
+    return entries;
+  const session = events[0].session;
+  const points = sessionPoints(events);
+  if (!points.length)
+    return entries;
+  const ordered = [...events].sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0));
+  const created = ordered[0].ts || now;
+  const first = ordered[0];
+  const existing = entries.find((e) => e.session === session);
+  const refreshed = {
+    id: session,
+    session,
+    title: memoryTitle(events),
+    points,
+    turns: points.length,
+    agent: first.agent ?? "",
+    model: first.model ?? "",
+    created: existing?.created ?? created,
+    updated: now,
+    reviews: existing?.reviews ?? 0,
+    lastReviewed: existing?.lastReviewed ?? 0,
+    // A conversation that keeps going is not "recalled": only an explicit
+    // review moves the date, so new turns must not push it into the future.
+    nextReview: existing?.nextReview ?? now + intervalDays(0) * DAY_MS
+  };
+  return existing ? entries.map((e) => e.session === session ? refreshed : e) : [...entries, refreshed];
+}
+var pad = (n) => String(n).padStart(2, "0");
+function formatDay(ms) {
+  const d = new Date(ms);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+function formatStamp2(ms) {
+  const d = new Date(ms);
+  return `${formatDay(ms)} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+function daysUntil(ms, now) {
+  return Math.round((ms - now) / DAY_MS);
+}
+function heading(title) {
+  return title.replace(/\r?\n/g, " ").replace(/^#+\s*/, "").trim() || "\uFF08\u65E0\u6807\u9898\u5BF9\u8BDD\uFF09";
+}
+function encodeMemoryData(entries) {
+  return ["<!-- memory:data", JSON.stringify(entries), "-->"].join("\n");
+}
+function parseMemoryFile(text) {
+  const match = /<!--\s*memory:data\s*\n([\s\S]*?)\n\s*-->/.exec(text);
+  if (!match)
+    return [];
+  try {
+    const parsed = JSON.parse(match[1]);
+    if (!Array.isArray(parsed))
+      return [];
+    const out = [];
+    for (const raw of parsed) {
+      if (raw === null || typeof raw !== "object")
+        continue;
+      const e = raw;
+      if (typeof e.session !== "string" || !e.session)
+        continue;
+      out.push({
+        id: typeof e.id === "string" ? e.id : e.session,
+        session: e.session,
+        title: typeof e.title === "string" ? e.title : "\uFF08\u65E0\u6807\u9898\u5BF9\u8BDD\uFF09",
+        points: Array.isArray(e.points) ? e.points.flatMap((p) => {
+          if (p === null || typeof p !== "object")
+            return [];
+          const pair = p;
+          if (typeof pair.q !== "string" || !pair.q)
+            return [];
+          return [{ q: pair.q, a: typeof pair.a === "string" ? pair.a : "" }];
+        }) : [],
+        turns: typeof e.turns === "number" ? e.turns : 0,
+        agent: typeof e.agent === "string" ? e.agent : "",
+        model: typeof e.model === "string" ? e.model : "",
+        created: typeof e.created === "number" ? e.created : 0,
+        updated: typeof e.updated === "number" ? e.updated : 0,
+        reviews: typeof e.reviews === "number" ? e.reviews : 0,
+        lastReviewed: typeof e.lastReviewed === "number" ? e.lastReviewed : 0,
+        nextReview: typeof e.nextReview === "number" ? e.nextReview : 0
+      });
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+function renderMemoryFile(entries, now) {
+  const due = dueEntries(entries, now);
+  const ordered = [...entries].sort((a, b) => (a.nextReview || 0) - (b.nextReview || 0));
+  const lines = [
+    "---",
+    "title: \u8BB0\u5FC6",
+    `updated: ${new Date(now).toISOString()}`,
+    `entries: ${entries.length}`,
+    `due: ${due.length}`,
+    "tags:",
+    "  - ai-memory",
+    "---",
+    "",
+    "# \u8BB0\u5FC6",
+    "",
+    "> \u7531 AI Vault Agent CN \u81EA\u52A8\u7EF4\u62A4\u3002\u6BCF\u8F6E\u5BF9\u8BDD\u66F4\u65B0\u4E00\u6B21\uFF0C\u5E76\u6309\u9057\u5FD8\u66F2\u7EBF\u5B89\u6392\u590D\u4E60\uFF1A",
+    "> \u95F4\u9694\u4F9D\u6B21\u4E3A " + REVIEW_LADDER_DAYS.join(" / ") + " \u5929\u3002\u6B63\u6587\u53EF\u4EE5\u968F\u610F\u4FEE\u6539\uFF0C",
+    "> \u672B\u5C3E `memory:data` \u6CE8\u91CA\u662F\u6392\u671F\u6570\u636E\uFF0C\u6539\u52A8\u4F1A\u4E22\u5931\u590D\u4E60\u8FDB\u5EA6\u3002",
+    ""
+  ];
+  lines.push(`## \u4ECA\u65E5\u5F85\u590D\u4E60${due.length ? `\uFF08${due.length}\uFF09` : ""}`, "");
+  if (!due.length) {
+    lines.push("\u4ECA\u5929\u6CA1\u6709\u5230\u671F\u7684\u8BB0\u5FC6\u3002", "");
+  } else {
+    for (const entry of due) {
+      const overdue = -daysUntil(entry.nextReview, now);
+      const when = overdue > 0 ? `\u5DF2\u8FC7\u671F ${overdue} \u5929` : "\u4ECA\u5929\u5230\u671F";
+      lines.push(`- [[#${heading(entry.title)}]] \xB7 ${when} \xB7 \u590D\u4E60 ${entry.reviews} \u6B21`);
+    }
+    lines.push("");
+  }
+  lines.push("## \u5168\u90E8\u8BB0\u5FC6", "");
+  if (!ordered.length) {
+    lines.push("\u8FD8\u6CA1\u6709\u8BB0\u5FC6\u3002\u53D1\u8D77\u4E00\u6B21\u5BF9\u8BDD\u540E\uFF0C\u8FD9\u91CC\u4F1A\u81EA\u52A8\u51FA\u73B0\u7B2C\u4E00\u6761\u3002", "");
+  }
+  for (const entry of ordered) {
+    const strength = Math.round(retention(entry, now) * 100);
+    const next = daysUntil(entry.nextReview, now);
+    const nextText = next > 0 ? `${next} \u5929\u540E` : next === 0 ? "\u4ECA\u5929" : `\u5DF2\u8FC7\u671F ${-next} \u5929`;
+    lines.push(`### ${heading(entry.title)}`, "");
+    lines.push(
+      `- \u4F1A\u8BDD \`${entry.session}\` \xB7 ${entry.turns} \u8F6E` + (entry.agent ? ` \xB7 ${entry.agent}` : "") + (entry.model ? ` \xB7 ${entry.model}` : "")
+    );
+    lines.push(
+      `- \u521B\u5EFA ${formatStamp2(entry.created)} \xB7 \u4E0B\u6B21\u590D\u4E60 ${nextText}\uFF08${formatDay(entry.nextReview)}\uFF09\xB7 \u590D\u4E60 ${entry.reviews} \u6B21 \xB7 \u8BB0\u5FC6\u5F3A\u5EA6 ${strength}%`
+    );
+    if (entry.points.length) {
+      lines.push("- \u8981\u70B9\uFF1A");
+      for (const point of entry.points) {
+        lines.push(`    - **\u95EE**\uFF1A${point.q}`);
+        if (point.a)
+          lines.push(`      **\u7B54**\uFF1A${point.a}`);
+      }
+    }
+    lines.push("");
+  }
+  lines.push(encodeMemoryData(entries), "");
   return lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
 }
 
@@ -2349,8 +2509,11 @@ var VaultAgentPlugin = class extends import_obsidian4.Plugin {
     this.addRibbonIcon("bot-message-square", t(this.settings.lang, "viewName"), () => void this.revealAgent());
     this.addCommand({ id: "open-agent", name: "\u6253\u5F00\u667A\u80FD\u4F53 / open agent", callback: () => void this.revealAgent() });
     this.addCommand({ id: "switch-agent", name: "\u5207\u6362\u667A\u80FD\u4F53 / switch agent", callback: () => this.openAgentSwitcher() });
+    this.addCommand({ id: "open-memory", name: "\u6253\u5F00\u8BB0\u5FC6\u6587\u4EF6 / open memory note", callback: () => void this.openMemoryNote() });
+    this.addCommand({ id: "review-memory", name: "\u590D\u4E60\u4ECA\u65E5\u8BB0\u5FC6 / review due memory", callback: () => void this.openMemoryReview() });
     this.settingTab = new VASettingTab(this.app, this);
     this.addSettingTab(this.settingTab);
+    this.app.workspace.onLayoutReady(() => this.notifyDueMemory());
   }
   onunload() {
   }
@@ -2369,6 +2532,52 @@ var VaultAgentPlugin = class extends import_obsidian4.Plugin {
     const setting = this.app.setting;
     setting.open();
     setting.openTabById(this.manifest.id);
+  }
+  /** Open `CN AI Agent/记忆.md`, creating it when it does not exist yet. */
+  async openMemoryNote() {
+    if (!this.app.vault.getAbstractFileByPath(MEMORY_FILE)) {
+      await this.writeMemoryFile(await this.readMemoryEntries(), Date.now()).catch((e) => this.warnMemoryFailure(e));
+    }
+    const file = this.app.vault.getAbstractFileByPath(MEMORY_FILE);
+    if (file instanceof import_obsidian4.TFile)
+      await this.app.workspace.getLeaf(false).openFile(file);
+  }
+  /**
+   * Ask whether the due memories were recalled, then reschedule them: recalled
+   * climbs the ladder, forgotten drops back to the first rung.
+   */
+  async openMemoryReview() {
+    const due = dueEntries(await this.readMemoryEntries(), Date.now());
+    if (!due.length) {
+      new import_obsidian4.Notice(t(this.settings.lang, "memoryNothingDue"));
+      return;
+    }
+    const lang = this.settings.lang;
+    new ConfirmModal(
+      this.app,
+      [tf(lang, "memoryReviewTitle", { n: due.length }), ...due.map((e) => "\xB7 " + e.title)],
+      { cancel: t(lang, "memoryForgotten"), confirm: t(lang, "memoryRecalled") },
+      () => void this.finishMemoryReview(true),
+      () => void this.finishMemoryReview(false)
+    ).open();
+  }
+  async finishMemoryReview(recalled) {
+    const { reviewed, remaining } = await this.reviewDueMemory(recalled).catch((e) => {
+      this.warnMemoryFailure(e);
+      return { reviewed: 0, remaining: 0 };
+    });
+    if (reviewed)
+      new import_obsidian4.Notice(tf(this.settings.lang, "memoryReviewed", { n: reviewed, left: remaining }));
+  }
+  /** On start-up, say once how many memories are due today. */
+  notifyDueMemory() {
+    if (!this.settings.memoryNotes)
+      return;
+    void this.readMemoryEntries().then((entries) => {
+      const due = dueEntries(entries, Date.now());
+      if (due.length)
+        new import_obsidian4.Notice(tf(this.settings.lang, "memoryDueToday", { n: due.length }), 8e3);
+    }).catch(() => void 0);
   }
   currentModelLabel() {
     const p = this.profile;
@@ -2617,12 +2826,12 @@ var VaultAgentPlugin = class extends import_obsidian4.Plugin {
     void this.saveSettings();
   }
   /**
-   * Rewrite the current session's memory note from `history.jsonl`.
+   * Fold the current session into the single memory note.
    *
-   * Called at the end of every turn rather than on unload: the note must be
-   * current even if Obsidian is quit abruptly, and one note per session means a
-   * rewrite is cheap and idempotent. Failures are reported once and then
-   * swallowed — a memory note is a convenience, never a reason to fail a turn.
+   * Called at the end of every turn: the note must be current even if Obsidian
+   * is quit abruptly, and rewriting one file is cheap and idempotent. Existing
+   * entries are preserved — including their review schedule — so this only ever
+   * adds or refreshes the entry for the active session.
    */
   async saveMemoryNote() {
     if (!this.settings.memoryNotes)
@@ -2634,22 +2843,56 @@ var VaultAgentPlugin = class extends import_obsidian4.Plugin {
       const events = parseHistory(await this.readHistoryText()).filter((e) => e.session === session);
       if (!events.some((e) => e.type === "user" || e.type === "assistant"))
         return;
-      const first = events.reduce((min, e) => Math.min(min, e.ts ?? 0), Number.MAX_SAFE_INTEGER);
-      const path = (0, import_obsidian4.normalizePath)(memoryPath(session, first));
-      await this.ensureFolder(MEMORY_FOLDER);
-      const text = renderMemoryNote(session, events);
-      const existing = this.app.vault.getAbstractFileByPath(path);
-      if (existing instanceof import_obsidian4.TFile)
-        await this.app.vault.modify(existing, text);
-      else
-        await this.app.vault.create(path, text);
+      const now = Date.now();
+      const entries = mergeSession(await this.readMemoryEntries(), events, now);
+      await this.writeMemoryFile(entries, now);
     } catch (e) {
-      if (!this.memoryWarned) {
-        this.memoryWarned = true;
-        console.error("[vault-agent] could not write the memory note", e);
-        new import_obsidian4.Notice(t(this.settings.lang, "memoryFailed"));
-      }
+      this.warnMemoryFailure(e);
     }
+  }
+  /** Every memory entry currently stored in the note. */
+  async readMemoryEntries() {
+    const file = this.app.vault.getAbstractFileByPath(MEMORY_FILE);
+    if (!(file instanceof import_obsidian4.TFile))
+      return [];
+    return parseMemoryFile(await this.app.vault.cachedRead(file));
+  }
+  /**
+   * Review the memory that is due now. Returns how many entries were handled,
+   * so the caller can tell the user what happened.
+   */
+  async reviewDueMemory(recalled) {
+    const now = Date.now();
+    const entries = await this.readMemoryEntries();
+    const due = dueEntries(entries, now);
+    if (!due.length)
+      return { reviewed: 0, remaining: 0 };
+    const ids = new Set(due.map((e) => e.session));
+    const next = entries.map((e) => {
+      if (!ids.has(e.session))
+        return e;
+      return recalled ? markReviewed(e, now) : markForgotten(e, now);
+    });
+    await this.writeMemoryFile(next, now);
+    return { reviewed: due.length, remaining: dueEntries(next, now).length };
+  }
+  /** Rewrite the note from `entries`; creates the folder and file when missing. */
+  async writeMemoryFile(entries, now) {
+    await this.ensureFolder(MEMORY_FOLDER);
+    const text = renderMemoryFile(entries, now);
+    const existing = this.app.vault.getAbstractFileByPath(MEMORY_FILE);
+    if (existing instanceof import_obsidian4.TFile)
+      await this.app.vault.modify(existing, text);
+    else
+      await this.app.vault.create(MEMORY_FILE, text);
+  }
+  /** A memory note is a convenience: report the first failure, never fail a turn. */
+  warnMemoryFailure(e) {
+    if (this.memoryWarned)
+      return;
+    this.memoryWarned = true;
+    console.error("[vault-agent] could not write the memory note", e);
+    new import_obsidian4.Notice(t(this.settings.lang, "memoryFailed"));
   }
   /** Create `CN AI Agent/` (and any parent) once; a no-op when it exists. */
   async ensureFolder(path) {
@@ -2680,17 +2923,21 @@ var VaultAgentPlugin = class extends import_obsidian4.Plugin {
   }
 };
 var ConfirmModal = class extends import_obsidian4.Modal {
-  constructor(app, lines, labels, onConfirm) {
+  constructor(app, lines, labels, onConfirm, onCancel) {
     super(app);
     this.lines = lines;
     this.labels = labels;
     this.onConfirm = onConfirm;
+    this.onCancel = onCancel;
   }
   onOpen() {
     for (const line of this.lines)
       this.contentEl.createEl("p", { text: line });
     const buttons = this.contentEl.createDiv({ cls: "va-confirm-buttons" });
-    buttons.createEl("button", { text: this.labels.cancel }).addEventListener("click", () => this.close());
+    buttons.createEl("button", { text: this.labels.cancel }).addEventListener("click", () => {
+      this.close();
+      this.onCancel?.();
+    });
     buttons.createEl("button", { cls: "mod-cta", text: this.labels.confirm }).addEventListener("click", () => {
       this.close();
       this.onConfirm();

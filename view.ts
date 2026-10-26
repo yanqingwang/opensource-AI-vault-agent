@@ -5,6 +5,7 @@ import { FetchLike, makeProxyFetch } from './proxyFetch';
 import { parseHistory, sessionCursor, sessionTranscript, summarizeSessions, type HistoryEvent } from './history';
 import { buildWebSearchToolDef, createWebSearchExecutor, resolveSearch, withTimeout, WEB_SEARCH_TOOL_NAME, type SearchPost, type SearchSettings } from './search';
 import { t } from './i18n';
+import { addCopyButton } from './clipboard';
 import { VaultToolExecutor, buildToolDefs } from './tools';
 import type VaultAgentPlugin from './main';
 
@@ -276,8 +277,18 @@ export class AgentView extends ItemView {
 		});
 	}
 
+	private copyLabels(): { copy: string; copied: string; failed: string } {
+		return { copy: this.st('copyMessage'), copied: this.st('copied'), failed: this.st('copyFailed') };
+	}
+
+	/**
+	 * One message row: the bubble plus a copy button that appears on hover.
+	 * The button is a sibling of the bubble, not a child, so a copied answer is
+	 * the answer and not "answer + chrome".
+	 */
 	private renderUserBubble(text: string): HTMLElement {
 		const el = this.msgsEl.createDiv({ cls: 'va-msg va-user' });
+		addCopyButton(el, () => text, this.copyLabels());
 		el.createDiv({ cls: 'va-user-text', text });
 		this.scrollBottom();
 		return el;
@@ -285,6 +296,7 @@ export class AgentView extends ItemView {
 
 	private renderAssistantDone(text: string): HTMLElement {
 		const el = this.msgsEl.createDiv({ cls: 'va-msg va-assistant' });
+		addCopyButton(el, () => text, this.copyLabels());
 		this.renderMarkdown(el, text);
 		this.scrollBottom();
 		return el;
@@ -333,6 +345,9 @@ export class AgentView extends ItemView {
 			finish: (full, reasoning) => {
 				el.removeClass('va-streaming');
 				textEl.remove();
+				// Added only once the turn is over: a copy during streaming would
+				// grab a half-written answer.
+				addCopyButton(el, () => full || acc, this.copyLabels());
 				const finalReasoning = normalizeReasoning(reasoning || reasoningAcc);
 				if (finalReasoning) {
 					if (!reasoningEl) {

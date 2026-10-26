@@ -24,8 +24,21 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Test
+        run: npm test
+
       - name: Build
         run: npm run build
+
+      # Obsidian refuses to publish a release whose tag is not the manifest
+      # version, and silently ignores a `v` prefix.
+      - name: Check tag matches manifest version
+        run: |
+          ver="$(node -p "require('./manifest.json').version")"
+          if [ "$GITHUB_REF_NAME" != "$ver" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match manifest.json version $ver"
+            exit 1
+          fi
 
       # Artifact attestations let users cryptographically verify that the
       # release assets were built from this repository by GitHub Actions.

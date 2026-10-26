@@ -2,7 +2,8 @@ import { App, Menu, Modal, Notice, Plugin, PluginSettingTab, Setting, normalizeP
 import { AgentView, VIEW_TYPE_AGENT } from './view';
 import { HistoryRecorder, newSessionId, type HistoryMeta, type SessionCursor } from './history';
 import { nativeSearchFor, withTimeout, type SearchDepth, type SearchMode } from './search';
-import { t, Lang } from './i18n';
+import { t, tf, Lang } from './i18n';
+import { MAGPIE_BASE_URL, MAGPIE_KEY, magpieModelsUrl, parseMagpieModels, pickDefaultMagpieModel, type MagpieModel } from './magpie';
 
 /** Wire protocol a provider speaks. Coding Plan (and Anthropic itself) use 'anthropic'. */
 export type Protocol = 'openai' | 'anthropic';
@@ -15,10 +16,26 @@ export interface ProviderPreset {
 	/** Defaults to 'openai' when omitted. */
 	protocol?: Protocol;
 	hint?: string;
+	/**
+	 * Key a fresh profile gets for this provider. Only Magpie has one: its local
+	 * gateway accepts any key and uses it to attribute usage to the app.
+	 */
+	defaultApiKey?: string;
+	/** Models come from the provider itself (Magpie's `/v1/models`), not from a fixed list. */
+	catalog?: boolean;
 }
 
 /** Curated OpenAI-compatible providers. "同源" rows are the model vendors behind popular Chinese AI tools. */
 export const PROVIDERS: ProviderPreset[] = [
+	{
+		id: 'magpie',
+		label: 'Magpie 本地网关 (本机)',
+		baseUrl: MAGPIE_BASE_URL,
+		models: [],
+		defaultApiKey: MAGPIE_KEY,
+		catalog: true,
+		hint: 'Magpie 在本机 127.0.0.1:3425 跑一个网关，把你在里面配置的订阅、API Key 和路由组都变成模型。下面的模型列表直接从网关 /v1/models 读取，点「重新读取」刷新；Magpie 没启动时请求会连不上。'
+	},
 	{ id: 'deepseek', label: 'DeepSeek 深度求索', baseUrl: 'https://api.deepseek.com/v1', models: ['deepseek-v4.1-flash', 'deepseek-v4-pro'], hint: 'V4.1 Flash 的官方调用名为 deepseek-flash（同一模型）；以 api.deepseek.com 实际返回为准' },
 	{ id: 'glm', label: '智谱 GLM (bigmodel.cn)', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', models: ['glm-4.6', 'glm-4.5-air'], hint: '模型 ID 以 bigmodel.cn 控制台为准' },
 	{ id: 'zai', label: 'Z.ai (GLM 海外版)', baseUrl: 'https://api.z.ai/api/paas/v4', models: ['glm-4.6', 'glm-4.5-air'] },
@@ -120,9 +137,51 @@ export function makeProfile(name: string, presetId?: string): AgentProfile {
 export function applyProviderPreset(profile: AgentProfile, providerId: string): void {
 	const preset = PROVIDERS.find(p => p.id === providerId);
 	if (!preset) return;
+	// `providerId` is what the settings dropdown shows, what native web search is
+	// resolved from and what history.jsonl records — an agent created from a
+	// template used to keep the default provider id, so every preset looked like
+	// DeepSeek there.
+	profile.providerId = preset.id;
 	profile.protocol = preset.protocol ?? 'openai';
 	profile.baseUrl = preset.baseUrl;
-	if (preset.models.length) profile.model = preset.models[0];
+	// A catalog provider (Magpie) has no fixed model list. Keep an id that looks
+	// like one of its own (`provider/model`, or a `group/…` routing group) so
+	// switching away and back does not lose the user's pick, and drop a vendor id
+	// such as `deepseek-chat` that the gateway does not serve.
+	if (preset.catalog) {
+		if (!profile.model.includes('/')) profile.model = '';
+	} else if (preset.models.length) profile.model = preset.models[0];
+	// A gateway key is not a credential for a real vendor: leaving
+	// `magpie-ai-vault-agent` in place after switching to DeepSeek would look like
+	// a filled-in key and then fail with an authentication error.
+	if (preset.defaultApiKey) profile.apiKey = preset.defaultApiKey;
+	else if (profile.apiKey === MAGPIE_KEY) profile.apiKey = '';
+}
+
+/**
+ * Repair profiles saved by versions that applied a preset without storing its
+ * id: the protocol, base URL and model came from the preset while `providerId`
+ * stayed at the default, so the settings dropdown claimed DeepSeek for an
+ * Anthropic Coding Plan agent and provider-native web search was resolved
+ * against the wrong vendor.
+ *
+ * Only profiles whose claimed provider has its own fixed base URL, but point
+ * somewhere else, are touched — and only when the address they use is a curated
+ * preset's address. A hand-written custom endpoint never matches, so user
+ * configuration is not rewritten.
+ */
+export function reconcileProviderIds(profiles: AgentProfile[]): boolean {
+	const norm = (url: string) => (url || '').trim().replace(/\/+$/, '');
+	let changed = false;
+	for (const profile of profiles) {
+		const claimed = PROVIDERS.find(p => p.id === profile.providerId);
+		if (!claimed?.baseUrl || norm(claimed.baseUrl) === norm(profile.baseUrl)) continue;
+		const match = PROVIDERS.find(p => p.baseUrl && norm(p.baseUrl) === norm(profile.baseUrl));
+		if (!match) continue;
+		profile.providerId = match.id;
+		changed = true;
+	}
+	return changed;
 }
 
 function defaultSettings(): VASettings {
@@ -193,6 +252,56 @@ export default class VaultAgentPlugin extends Plugin {
 		this.settings.activeProfileId = profile.id;
 		void this.saveSettings();
 		return profile;
+	}
+
+	/**
+	 * Ask the Magpie gateway which models the user has enabled. Read through
+	 * `requestUrl` so a gateway on another machine (Settings → Share on local
+	 * network) and a browser without CORS both work.
+	 */
+	async fetchMagpieModels(baseUrl: string): Promise<MagpieModel[]> {
+		const res = await withTimeout(
+			requestUrl({
+				url: magpieModelsUrl(baseUrl),
+				method: 'GET',
+				headers: { Authorization: 'Bearer ' + MAGPIE_KEY },
+				throw: false
+			}),
+			10000,
+			'magpie models'
+		);
+		if (res.status >= 400) throw new Error(`HTTP ${res.status}`);
+		return parseMagpieModels(JSON.parse(res.text));
+	}
+
+	/**
+	 * One-click Magpie agent: fills the gateway base URL and key, then adopts a
+	 * model from the live catalog. When the gateway is down the agent is still
+	 * created (the user may start Magpie later) and the caller reports why the
+	 * model list is empty.
+	 */
+	async createMagpieProfile(): Promise<{ profile: AgentProfile; models: MagpieModel[] | null }> {
+		const profile = this.createProfile(t(this.settings.lang, 'magpieAgentName'), 'magpie');
+		const models = await this.adoptCatalogModel(profile);
+		return { profile, models };
+	}
+
+	/**
+	 * Point a catalog-driven profile at a model the gateway actually lists, and
+	 * return the catalog (`null` when the gateway could not be read). Without this
+	 * a profile switched to Magpie would keep the previous vendor's model id, which
+	 * the gateway does not serve.
+	 */
+	async adoptCatalogModel(profile: AgentProfile): Promise<MagpieModel[] | null> {
+		try {
+			const models = await this.fetchMagpieModels(profile.baseUrl);
+			const model = pickDefaultMagpieModel(models, profile.model);
+			if (model) profile.model = model;
+			await this.saveSettings();
+			return models;
+		} catch {
+			return null;
+		}
 	}
 
 	/** Copy a profile (keys and all) under a new id, so it can be tweaked separately. */
@@ -291,6 +400,7 @@ export default class VaultAgentPlugin extends Plugin {
 				// Already in the multi-agent shape; fill in anything a future version adds.
 				const profiles = data.profiles.map(p => ({ ...PROFILE_DEFAULTS, ...p })) as AgentProfile[];
 				const active = profiles.some(p => p.id === data.activeProfileId) ? (data.activeProfileId as string) : profiles[0].id;
+				if (reconcileProviderIds(profiles)) migrated = true;
 				this.settings = {
 					lang: data.lang ?? 'zh',
 					profiles,
@@ -512,8 +622,22 @@ class VASettingTab extends PluginSettingTab {
 		const buttons = el.createDiv({ cls: 'va-agent-buttons' });
 		const add = buttons.createEl('button', { cls: 'mod-cta', text: '＋ ' + this.st('newAgent') });
 		add.addEventListener('click', () => { this.plugin.createProfile(); this.refreshTab(); });
+		const magpie = buttons.createEl('button', { text: '🪄 ' + this.st('magpieTemplate') });
+		magpie.addEventListener('click', () => {
+			magpie.disabled = true;
+			void this.plugin.createMagpieProfile().then(({ profile, models }) => {
+				if (models === null) new Notice(this.magpieUnreachable(profile.baseUrl));
+				else if (!models.length) new Notice(this.st('magpieModelsEmpty'));
+				else new Notice(tf(this.plugin.lang, 'magpieModelPicked', { model: profile.model }));
+				this.refreshTab();
+			});
+		});
 		const tpl = buttons.createEl('button', { text: '⚡ ' + this.st('codingPlanTemplate') });
 		tpl.addEventListener('click', () => { this.plugin.createProfile(this.st('codingAgentName'), 'ark-coding'); this.refreshTab(); });
+	}
+
+	private magpieUnreachable(baseUrl: string): string {
+		return tf(this.plugin.lang, 'magpieUnreachable', { url: magpieModelsUrl(baseUrl) });
 	}
 
 	private deleteAgent(id: string): void {
@@ -591,21 +715,14 @@ class VASettingTab extends PluginSettingTab {
 				control: { type: 'text', key: 'model' }
 			},
 			{
-				name: this.st('modelPreset'),
+				// The Magpie row is a live catalog, not a fixed list of presets.
+				name: this.preset?.catalog ? this.st('magpieModels') : this.st('modelPreset'),
 				searchable: false,
-				visible: () => !!(PROVIDERS.find(p => p.id === this.profile.providerId)?.models.length),
+				visible: () => this.hasModelChips(),
 				render: (setting) => {
-					const preset = PROVIDERS.find(p => p.id === this.profile.providerId);
-					for (const m of preset?.models ?? []) {
-						const btn = setting.controlEl.createEl('button', { text: m });
-						if (m === this.profile.model) btn.addClass('va-chip-active');
-						btn.addEventListener('click', () => {
-							this.profile.model = m;
-							void this.plugin.saveSettings();
-							setting.controlEl.querySelectorAll('button').forEach(b => b.removeClass('va-chip-active'));
-							btn.addClass('va-chip-active');
-						});
-					}
+					setting.settingEl.addClass('va-model-chips');
+					const el = setting.controlEl.createDiv({ cls: 'va-model-chip-row' });
+					this.renderModelChips(el);
 					return () => setting.controlEl.empty();
 				}
 			},
@@ -726,13 +843,23 @@ class VASettingTab extends PluginSettingTab {
 		const s = this.profile;
 		(s as unknown as Record<string, unknown>)[key] = value;
 		await this.plugin.saveSettings();
+		if (key === 'baseUrl' && this.preset?.catalog) {
+			// Typing a port must not fire a request per keystroke, and re-rendering
+			// the tab would drop focus, so only the chip row is refreshed.
+			window.clearTimeout(this.baseUrlTimer);
+			this.baseUrlTimer = window.setTimeout(() => {
+				const el = this.liveChipEl;
+				if (el?.isConnected) this.renderModelChips(el);
+			}, 700);
+		}
 		if (key === 'providerId' && typeof value === 'string') {
 			// Switching provider rewrites the protocol, base URL and default model;
 			// re-render so those rows show the new values (deferred so we do not
 			// tear down the dropdown mid-change-event).
 			applyProviderPreset(s, value);
 			await this.plugin.saveSettings();
-			window.setTimeout(() => this.refreshTab(), 0);
+			if (this.preset?.catalog) void this.plugin.adoptCatalogModel(s).then(() => this.refreshTab());
+			else window.setTimeout(() => this.refreshTab(), 0);
 		}
 	}
 
@@ -773,8 +900,8 @@ class VASettingTab extends PluginSettingTab {
 				for (const [id, label] of providerNames) d.addOption(id, label);
 				d.setValue(s.providerId).onChange(async v => {
 					applyProviderPreset(s, v);
-					s.providerId = v;
 					await this.plugin.saveSettings();
+					if (PROVIDERS.find(p => p.id === v)?.catalog) await this.plugin.adoptCatalogModel(s);
 					this.refreshTab();
 				});
 			});
@@ -900,29 +1027,116 @@ class VASettingTab extends PluginSettingTab {
 				.onChange(async v => { s.searchDepth = v as SearchDepth; await this.plugin.saveSettings(); }));
 	}
 
-	/** Provider hint + model preset chips; re-rendered in place when the provider changes. */
+	/** Provider hint + model chips; re-rendered in place when the provider changes. */
 	private renderProviderExtras(containerEl: HTMLElement): void {
-		const s = this.profile;
-		const preset = PROVIDERS.find(p => p.id === s.providerId);
+		const preset = PROVIDERS.find(p => p.id === this.profile.providerId);
 
 		if (preset?.hint) {
 			const hint = new Setting(containerEl).setClass('va-hint');
 			hint.nameEl.setText('ℹ️ ' + preset.hint);
 		}
 
-		if (!preset?.models.length) return;
-		const presets = new Setting(containerEl).setName(this.st('modelPreset')).setClass('va-model-chips');
-		for (const m of preset.models) {
-			presets.addButton(b => {
-				b.setButtonText(m);
-				if (s.model === m) b.buttonEl.addClass('va-chip-active');
-				b.onClick(async () => {
-					s.model = m;
-					await this.plugin.saveSettings();
-					presets.controlEl.querySelectorAll('button').forEach(el => el.removeClass('va-chip-active'));
-					b.buttonEl.addClass('va-chip-active');
-				});
-			});
+		if (!this.hasModelChips()) return;
+		const title = this.preset?.catalog ? this.st('magpieModels') : this.st('modelPreset');
+		const row = new Setting(containerEl).setName(title).setClass('va-model-chips');
+		this.renderModelChips(row.controlEl.createDiv({ cls: 'va-model-chip-row' }));
+	}
+
+	// ------------------------------------------------------ model chips
+
+	/**
+	 * Magpie's catalog as last read, keyed by the base URL it came from: another
+	 * agent (or an edited base URL) means another gateway, so a stale list must
+	 * never be shown as if it belonged to the current one.
+	 */
+	private magpieCache: { url: string; models: MagpieModel[] } | null = null;
+	private magpieLoading = false;
+	/** Base URL whose read failed, so rendering does not retry on every paint. */
+	private magpieFailedUrl = '';
+	/**
+	 * The chip row currently in the settings tab. A read started by one render can
+	 * finish after Obsidian rebuilt the row (changing a setting re-renders the tab),
+	 * so the result is painted into whichever row is live instead of the one that
+	 * asked for it.
+	 */
+	private liveChipEl: HTMLElement | null = null;
+	private baseUrlTimer = 0;
+
+	private get preset(): ProviderPreset | undefined {
+		return PROVIDERS.find(p => p.id === this.profile.providerId);
+	}
+
+	private hasModelChips(): boolean {
+		const preset = this.preset;
+		return !!preset && (!!preset.catalog || preset.models.length > 0);
+	}
+
+	/**
+	 * Clickable model chips for the current agent. Curated providers use their
+	 * fixed list; Magpie's list is read from the gateway, because the user adds
+	 * and removes providers inside Magpie rather than in this plugin.
+	 */
+	private renderModelChips(el: HTMLElement): void {
+		el.empty();
+		const profile = this.profile;
+		const preset = this.preset;
+
+		if (!preset?.catalog) {
+			for (const m of preset?.models ?? []) this.addModelChip(el, m, m);
+			return;
 		}
+
+		const url = magpieModelsUrl(profile.baseUrl);
+		const models = this.magpieCache?.url === url ? this.magpieCache.models : null;
+		this.liveChipEl = el;
+
+		const bar = el.createDiv({ cls: 'va-chip-bar' });
+		const reload = bar.createEl('button', { text: this.st('magpieModelsRefresh') });
+		reload.addEventListener('click', () => {
+			this.magpieCache = null;
+			this.magpieFailedUrl = '';
+			void this.loadMagpieModels(el);
+		});
+		const status = bar.createSpan({ cls: 'va-chip-status' });
+		if (this.magpieLoading) status.setText(this.st('magpieModelsLoading'));
+		else if (this.magpieFailedUrl === url) status.setText(this.magpieUnreachable(profile.baseUrl));
+		else if (models && !models.length) status.setText(this.st('magpieModelsEmpty'));
+		else if (models) status.setText(tf(this.plugin.lang, 'magpieModelsLoaded', { n: models.length }));
+
+		for (const m of models ?? []) {
+			this.addModelChip(el, m.id, m.displayName ? `${m.displayName} · ${m.id}` : m.id);
+		}
+
+		// Nothing cached for this gateway yet, and no read in flight: go read it.
+		if (!models && !this.magpieLoading && this.magpieFailedUrl !== url) void this.loadMagpieModels(el);
+	}
+
+	private addModelChip(el: HTMLElement, modelId: string, label: string): void {
+		const btn = el.createEl('button', { text: label, attr: { title: modelId } });
+		if (modelId === this.profile.model) btn.addClass('va-chip-active');
+		btn.addEventListener('click', () => {
+			this.profile.model = modelId;
+			void this.plugin.saveSettings();
+			el.querySelectorAll('button').forEach(b => b.removeClass('va-chip-active'));
+			btn.addClass('va-chip-active');
+		});
+	}
+
+	private async loadMagpieModels(el: HTMLElement): Promise<void> {
+		const url = magpieModelsUrl(this.profile.baseUrl);
+		this.magpieLoading = true;
+		this.renderModelChips(el);
+		try {
+			const models = await this.plugin.fetchMagpieModels(this.profile.baseUrl);
+			this.magpieCache = { url, models };
+			this.magpieFailedUrl = '';
+		} catch {
+			this.magpieCache = null;
+			this.magpieFailedUrl = url;
+		} finally {
+			this.magpieLoading = false;
+		}
+		const live = this.liveChipEl;
+		if (live?.isConnected) this.renderModelChips(live);
 	}
 }

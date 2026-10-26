@@ -27,13 +27,14 @@ __export(main_exports, {
   PROVIDERS: () => PROVIDERS,
   applyProviderPreset: () => applyProviderPreset,
   default: () => VaultAgentPlugin,
-  makeProfile: () => makeProfile
+  makeProfile: () => makeProfile,
+  reconcileProviderIds: () => reconcileProviderIds
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian3 = require("obsidian");
+var import_obsidian4 = require("obsidian");
 
 // view.ts
-var import_obsidian2 = require("obsidian");
+var import_obsidian3 = require("obsidian");
 
 // agent.ts
 async function chatCompletion(cfg, messages, tools, h) {
@@ -1021,17 +1022,29 @@ function errorMessage(data) {
 
 // i18n.ts
 var zh = {
-  viewName: "Vault Agent",
+  viewName: "AI Vault Agent CN",
   viewIcon: "bot-message-square",
   newChat: "\u65B0\u5BF9\u8BDD",
   stop: "\u505C\u6B62",
   send: "\u53D1\u9001",
   inputPlaceholder: "\u5411\u667A\u80FD\u4F53\u63D0\u95EE\uFF0C\u6216\u8BA9\u5B83\u64CD\u4F5C\u4F60\u7684\u7B14\u8BB0\u2026\uFF08Enter \u53D1\u9001\uFF0CShift+Enter \u6362\u884C\uFF09",
-  welcome: "\u6211\u662F\u4F60\u7684 vault \u667A\u80FD\u4F53\u3002\u53EF\u4EE5\u76F4\u63A5\u95EE\u6211\u95EE\u9898\uFF0C\u4E5F\u53EF\u4EE5\u8BA9\u6211**\u641C\u7D22\u3001\u521B\u5EFA\u3001\u4FEE\u6539**\u7B14\u8BB0\u3002\n\n\u5F00\u59CB\u524D\u8BF7\u5728\u8BBE\u7F6E\u4E2D\u586B\u5165\u6A21\u578B\u670D\u52A1\u5546\u7684 API Key\uFF08\u652F\u6301 DeepSeek / \u667A\u8C31 GLM / Kimi / \u901A\u4E49 Qwen / \u706B\u5C71\u65B9\u821F / \u817E\u8BAF\u6DF7\u5143 / Hermes(Nous) / OpenRouter \u6216\u4EFB\u610F OpenAI \u517C\u5BB9\u7AEF\u70B9\uFF09\u3002\n\n\u652F\u6301\u914D\u7F6E**\u591A\u4E2A Agent**\uFF08\u5982\u706B\u5C71\u65B9\u821F Coding Plan \u7684\u8C46\u5305\u7F16\u7A0B\u6A21\u578B\uFF09\uFF0C\u70B9\u6807\u9898\u680F\u5373\u53EF\u5FEB\u901F\u5207\u6362\uFF1B\u6240\u6709 Agent \u5171\u4EAB\u5F53\u524D\u5BF9\u8BDD\u3002",
+  welcome: "\u6211\u662F\u4F60\u7684 vault \u667A\u80FD\u4F53\u3002\u53EF\u4EE5\u76F4\u63A5\u95EE\u6211\u95EE\u9898\uFF0C\u4E5F\u53EF\u4EE5\u8BA9\u6211**\u641C\u7D22\u3001\u521B\u5EFA\u3001\u4FEE\u6539**\u7B14\u8BB0\u3002\n\n\u5F00\u59CB\u524D\u8BF7\u5728\u8BBE\u7F6E\u4E2D\u586B\u5165\u6A21\u578B\u670D\u52A1\u5546\u7684 API Key\uFF08\u652F\u6301 DeepSeek / \u667A\u8C31 GLM / Kimi / \u901A\u4E49 Qwen / \u706B\u5C71\u65B9\u821F / \u817E\u8BAF\u6DF7\u5143 / Hermes(Nous) / OpenRouter \u6216\u4EFB\u610F OpenAI \u517C\u5BB9\u7AEF\u70B9\uFF09\u3002\n\n\u652F\u6301\u914D\u7F6E**\u591A\u4E2A Agent**\uFF08\u5982\u706B\u5C71\u65B9\u821F Coding Plan \u7684\u8C46\u5305\u7F16\u7A0B\u6A21\u578B\uFF0C\u6216\u7528 Magpie \u672C\u5730\u7F51\u5173\u4E00\u952E\u63A5\u5165\u672C\u673A\u6240\u6709\u8BA2\u9605\uFF09\uFF0C\u70B9\u6807\u9898\u680F\u5373\u53EF\u5FEB\u901F\u5207\u6362\uFF1B\u6240\u6709 Agent \u5171\u4EAB\u5F53\u524D\u5BF9\u8BDD\u3002",
   agentsHeading: "\u667A\u80FD\u4F53 (Agents)",
   agentsHeadingDesc: "\u6BCF\u4E2A Agent \u4FDD\u5B58\u5404\u81EA\u7684\u670D\u52A1\u5546\u3001Key \u4E0E\u63D0\u793A\u8BCD\uFF1B\u5BF9\u8BDD\u5168\u5C40\u5171\u4EAB\uFF0C\u5207\u6362 Agent \u4E0D\u6362\u4E0A\u4E0B\u6587\u3002",
   newAgent: "\u65B0\u5EFA\u7A7A\u767D Agent",
   codingPlanTemplate: "\u7528\u706B\u5C71 Coding Plan \u6A21\u677F\u65B0\u5EFA",
+  magpieTemplate: "\u7528 Magpie \u6A21\u677F\u4E00\u952E\u65B0\u5EFA",
+  magpieAgentName: "Magpie \u7F51\u5173",
+  magpieModels: "Magpie \u6A21\u578B\uFF08\u4ECE\u7F51\u5173\u5B9E\u65F6\u8BFB\u53D6\uFF09",
+  magpieModelsRefresh: "\u91CD\u65B0\u8BFB\u53D6",
+  magpieModelsLoading: "\u6B63\u5728\u8BFB\u53D6\u7F51\u5173\u6A21\u578B\u5217\u8868\u2026",
+  magpieModelsEmpty: "\u7F51\u5173\u6CA1\u6709\u8FD4\u56DE\u4EFB\u4F55\u6A21\u578B\u3002\u8BF7\u5148\u5728 Magpie \u7684 Providers \u91CC\u542F\u7528\u81F3\u5C11\u4E00\u4E2A\u670D\u52A1\u5546\u3002",
+  magpieModelsLoaded: "\u5DF2\u8BFB\u53D6 {n} \u4E2A\u6A21\u578B",
+  magpieUnreachable: "\u8FDE\u4E0D\u4E0A Magpie \u7F51\u5173\uFF08{url}\uFF09\u3002\u8BF7\u786E\u8BA4 Magpie \u5DF2\u542F\u52A8\uFF0C\u6216\u628A Base URL \u6539\u6210\u7F51\u5173\u5B9E\u9645\u7AEF\u53E3\u3002",
+  magpieModelPicked: "Magpie Agent \u5DF2\u521B\u5EFA\uFF0C\u6A21\u578B\uFF1A{model}",
+  copyMessage: "\u590D\u5236\u8FD9\u6761\u6D88\u606F",
+  copied: "\u5DF2\u590D\u5236",
+  copyFailed: "\u590D\u5236\u5931\u8D25",
   defaultAgentName: "\u9ED8\u8BA4 Agent",
   codingAgentName: "\u706B\u5C71 Coding Plan",
   newAgentName: "\u65B0 Agent",
@@ -1059,7 +1072,7 @@ var zh = {
   streaming: "\u751F\u6210\u4E2D\u2026",
   errPrefix: "\u8BF7\u6C42\u5931\u8D25",
   maxIterReached: "\u5DF2\u8FBE\u5355\u8F6E\u5DE5\u5177\u8C03\u7528\u4E0A\u9650\uFF0C\u8BF7\u7EE7\u7EED\u5BF9\u8BDD\u8BA9\u5B83\u63A5\u7740\u505A\u3002",
-  settingsHeading: "Vault Agent",
+  settingsHeading: "AI Vault Agent CN",
   provider: "\u6A21\u578B\u670D\u52A1\u5546",
   providerDesc: "\u9009\u62E9\u670D\u52A1\u5546\u540E\u81EA\u52A8\u586B\u5145 API \u5730\u5740\uFF0C\u53EF\u518D\u624B\u52A8\u4FEE\u6539\u3002Trae \u540C\u6E90\uFF08\u706B\u5C71\u65B9\u821F\uFF09\u3001Qoder \u540C\u6E90\uFF08\u901A\u4E49\uFF09\u3001WorkBuddy \u540C\u6E90\uFF08\u817E\u8BAF\u6DF7\u5143\uFF09\u7B49\u5747\u53EF\u76F4\u8FDE\u3002",
   baseUrl: "API \u5730\u5740 (Base URL)",
@@ -1114,17 +1127,29 @@ var zh = {
   emptyReply: "\u26A0\uFE0F \u6A21\u578B\u672C\u8F6E\u6CA1\u6709\u8FD4\u56DE\u4EFB\u4F55\u5185\u5BB9\uFF08\u53EF\u80FD\u662F\u670D\u52A1\u5546\u4FA7\u4E2D\u65AD\u3001\u6216\u89E6\u53D1\u4E86\u8F93\u51FA\u957F\u5EA6\u9650\u5236\uFF09\u3002\u8BF7\u76F4\u63A5\u91CD\u8BD5\uFF0C\u6216\u6362\u4E2A\u8BF4\u6CD5\u518D\u95EE\u4E00\u6B21\u3002"
 };
 var en = {
-  viewName: "Vault Agent",
+  viewName: "AI Vault Agent CN",
   viewIcon: "bot-message-square",
   newChat: "New chat",
   stop: "Stop",
   send: "Send",
   inputPlaceholder: "Ask the agent, or have it work on your notes\u2026 (Enter to send, Shift+Enter for newline)",
-  welcome: "I'm your vault agent. Ask me anything, or have me **search, create, and edit** notes.\n\nPick a provider and paste an API key in settings (DeepSeek / GLM / Kimi / Qwen / Volcengine Ark / Tencent Hunyuan / Hermes(Nous) / OpenRouter / any OpenAI-compatible endpoint).\n\nYou can configure **multiple agents** (e.g. the Doubao coding model via Volcengine Coding Plan) and switch instantly from the header; the conversation is shared.",
+  welcome: "I'm your vault agent. Ask me anything, or have me **search, create, and edit** notes.\n\nPick a provider and paste an API key in settings (DeepSeek / GLM / Kimi / Qwen / Volcengine Ark / Tencent Hunyuan / Hermes(Nous) / OpenRouter / any OpenAI-compatible endpoint).\n\nYou can configure **multiple agents** (e.g. the Doubao coding model via Volcengine Coding Plan, or a one-click Magpie gateway agent that reaches every subscription on this machine) and switch instantly from the header; the conversation is shared.",
   agentsHeading: "Agents",
   agentsHeadingDesc: "Each agent keeps its own provider, key and prompts; the conversation is shared, so switching keeps the context.",
   newAgent: "New blank agent",
   codingPlanTemplate: "New from Volcengine Coding Plan template",
+  magpieTemplate: "New from Magpie template",
+  magpieAgentName: "Magpie gateway",
+  magpieModels: "Magpie models (read live from the gateway)",
+  magpieModelsRefresh: "Reload",
+  magpieModelsLoading: "Reading the gateway model list\u2026",
+  magpieModelsEmpty: "The gateway returned no models. Enable at least one provider in Magpie first.",
+  magpieModelsLoaded: "{n} models loaded",
+  magpieUnreachable: "Cannot reach the Magpie gateway ({url}). Check that Magpie is running, or point Base URL at its actual port.",
+  magpieModelPicked: "Magpie agent created, model: {model}",
+  copyMessage: "Copy this message",
+  copied: "Copied",
+  copyFailed: "Copy failed",
   defaultAgentName: "Default agent",
   codingAgentName: "Volcengine Coding Plan",
   newAgentName: "New agent",
@@ -1152,7 +1177,7 @@ var en = {
   streaming: "Generating\u2026",
   errPrefix: "Request failed",
   maxIterReached: "Tool-call limit for this turn reached \u2014 keep chatting to continue.",
-  settingsHeading: "Vault Agent",
+  settingsHeading: "AI Vault Agent CN",
   provider: "Provider",
   providerDesc: "Base URL is auto-filled when you pick a provider; adjust freely. Volcengine Ark (Trae), DashScope (Qoder), Tencent Hunyuan (WorkBuddy) connect directly.",
   baseUrl: "API base URL",
@@ -1210,9 +1235,60 @@ var STRINGS = { zh, en };
 function t(lang, key) {
   return STRINGS[lang][key];
 }
+function tf(lang, key, vars) {
+  return t(lang, key).replace(/\{(\w+)\}/g, (m, name) => name in vars ? String(vars[name]) : m);
+}
+
+// clipboard.ts
+var import_obsidian = require("obsidian");
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+  }
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.top = "-1000px";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    const ok2 = document.execCommand("copy");
+    ta.remove();
+    return ok2;
+  } catch {
+    return false;
+  }
+}
+function addCopyButton(parent, getText, labels) {
+  const btn = parent.createEl("button", { cls: "va-copy-btn", attr: { "aria-label": labels.copy, title: labels.copy } });
+  (0, import_obsidian.setIcon)(btn, "copy");
+  const relabel = (text) => {
+    btn.setAttribute("aria-label", text);
+    btn.setAttribute("title", text);
+  };
+  btn.addEventListener("click", async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const ok2 = await copyText(getText());
+    (0, import_obsidian.setIcon)(btn, ok2 ? "check" : "x");
+    relabel(ok2 ? labels.copied : labels.failed);
+    btn.addClass(ok2 ? "va-copy-ok" : "va-copy-fail");
+    window.setTimeout(() => {
+      (0, import_obsidian.setIcon)(btn, "copy");
+      relabel(labels.copy);
+      btn.removeClass("va-copy-ok");
+      btn.removeClass("va-copy-fail");
+    }, 1200);
+  });
+  return btn;
+}
 
 // tools.ts
-var import_obsidian = require("obsidian");
+var import_obsidian2 = require("obsidian");
 var MAX_READ = 3e4;
 var MAX_RESULTS = 60;
 function buildToolDefs() {
@@ -1361,15 +1437,15 @@ var VaultToolExecutor = class {
     }
   }
   resolve(path) {
-    return (0, import_obsidian.normalizePath)(String(path ?? "").trim().replace(/^\/+/, ""));
+    return (0, import_obsidian2.normalizePath)(String(path ?? "").trim().replace(/^\/+/, ""));
   }
   async listNotes(folder, glob) {
     const fp = this.resolve(folder);
     const af = this.app.vault.getAbstractFileByPath(fp);
     let files;
-    if (af instanceof import_obsidian.TFolder) {
+    if (af instanceof import_obsidian2.TFolder) {
       files = this.app.vault.getMarkdownFiles().filter((f) => f.path === fp || f.path.startsWith(fp === "/" ? "" : fp + "/"));
-    } else if (af instanceof import_obsidian.TFile) {
+    } else if (af instanceof import_obsidian2.TFile) {
       files = [af];
     } else {
       files = this.app.vault.getMarkdownFiles();
@@ -1496,7 +1572,7 @@ var VaultToolExecutor = class {
     const file = this.app.vault.getFileByPath(p);
     if (!file)
       throw new Error(`note not found: ${p}`);
-    if (!(file instanceof import_obsidian.TFile))
+    if (!(file instanceof import_obsidian2.TFile))
       throw new Error(`not a file: ${p}`);
     return file;
   }
@@ -1507,7 +1583,7 @@ function ok(content) {
 
 // view.ts
 var VIEW_TYPE_AGENT = "vault-agent-view";
-var AgentView = class extends import_obsidian2.ItemView {
+var AgentView = class extends import_obsidian3.ItemView {
   constructor(leaf, plugin) {
     super(leaf);
     this.plugin = plugin;
@@ -1572,17 +1648,17 @@ var AgentView = class extends import_obsidian2.ItemView {
     root.addClass("va-root");
     const header = root.createDiv({ cls: "va-header" });
     const brand = header.createDiv({ cls: "va-brand" });
-    (0, import_obsidian2.setIcon)(brand, "bot-message-square");
+    (0, import_obsidian3.setIcon)(brand, "bot-message-square");
     this.brandEl = brand.createSpan({ text: this.brandLabel() });
     const actions = header.createDiv({ cls: "va-header-actions" });
     this.switchBtn = actions.createEl("button", { cls: "va-icon-btn", attr: { "aria-label": this.st("switchAgent"), title: this.st("switchAgent") } });
-    (0, import_obsidian2.setIcon)(this.switchBtn, "chevrons-up-down");
+    (0, import_obsidian3.setIcon)(this.switchBtn, "chevrons-up-down");
     this.switchBtn.addEventListener("click", (e) => this.plugin.openAgentSwitcher(e));
     const historyBtn = actions.createEl("button", { cls: "va-icon-btn", attr: { "aria-label": this.st("history") } });
-    (0, import_obsidian2.setIcon)(historyBtn, "history");
+    (0, import_obsidian3.setIcon)(historyBtn, "history");
     historyBtn.addEventListener("click", () => void this.openHistory());
     const newBtn = actions.createEl("button", { cls: "va-icon-btn", attr: { "aria-label": this.st("newChat") } });
-    (0, import_obsidian2.setIcon)(newBtn, "plus");
+    (0, import_obsidian3.setIcon)(newBtn, "plus");
     newBtn.addEventListener("click", () => {
       if (this.running)
         return;
@@ -1593,7 +1669,7 @@ var AgentView = class extends import_obsidian2.ItemView {
       this.addWelcome();
     });
     const clearBtn = actions.createEl("button", { cls: "va-icon-btn", attr: { "aria-label": this.st("clearChat") } });
-    (0, import_obsidian2.setIcon)(clearBtn, "trash-2");
+    (0, import_obsidian3.setIcon)(clearBtn, "trash-2");
     clearBtn.addEventListener("click", () => {
       if (this.running)
         return;
@@ -1604,7 +1680,7 @@ var AgentView = class extends import_obsidian2.ItemView {
       this.addWelcome();
     });
     const settingsBtn = actions.createEl("button", { cls: "va-icon-btn", attr: { "aria-label": this.st("openSettings") } });
-    (0, import_obsidian2.setIcon)(settingsBtn, "settings");
+    (0, import_obsidian3.setIcon)(settingsBtn, "settings");
     settingsBtn.addEventListener("click", () => this.plugin.openSettings());
     this.msgsEl = root.createDiv({ cls: "va-messages" });
     this.historyEl = root.createDiv({ cls: "va-history" });
@@ -1647,7 +1723,7 @@ var AgentView = class extends import_obsidian2.ItemView {
   }
   async openHistory() {
     if (this.running) {
-      new import_obsidian2.Notice(this.st("busy"));
+      new import_obsidian3.Notice(this.st("busy"));
       return;
     }
     this.historyText = await this.plugin.readHistoryText();
@@ -1659,7 +1735,7 @@ var AgentView = class extends import_obsidian2.ItemView {
     this.historyEl.empty();
     const bar = this.historyEl.createDiv({ cls: "va-history-bar" });
     const back = bar.createEl("button", { cls: "va-icon-btn", attr: { "aria-label": this.st("backToChat") } });
-    (0, import_obsidian2.setIcon)(back, "arrow-left");
+    (0, import_obsidian3.setIcon)(back, "arrow-left");
     back.addEventListener("click", () => this.setMode("chat"));
     const filter = bar.createEl("input", {
       cls: "va-history-filter",
@@ -1711,7 +1787,7 @@ var AgentView = class extends import_obsidian2.ItemView {
       this.renderAllHistory();
     else
       this.addWelcome();
-    new import_obsidian2.Notice(`${this.st("historyLoaded")}: ${sessionId.slice(0, 8)}`);
+    new import_obsidian3.Notice(`${this.st("historyLoaded")}: ${sessionId.slice(0, 8)}`);
   }
   /**
    * Whether the transcript is scrolled to (or within a line of) the bottom.
@@ -1737,7 +1813,7 @@ var AgentView = class extends import_obsidian2.ItemView {
    * (empty <p> from leading/trailing newlines, <br> runs at block edges).
    */
   renderMarkdown(container, text) {
-    void import_obsidian2.MarkdownRenderer.render(this.app, text.trim() || "\u2026", container, "", this).then(() => {
+    void import_obsidian3.MarkdownRenderer.render(this.app, text.trim() || "\u2026", container, "", this).then(() => {
       container.querySelectorAll("br").forEach((br) => {
         const parent = br.parentElement;
         if (!parent)
@@ -1756,14 +1832,24 @@ var AgentView = class extends import_obsidian2.ItemView {
       });
     });
   }
+  copyLabels() {
+    return { copy: this.st("copyMessage"), copied: this.st("copied"), failed: this.st("copyFailed") };
+  }
+  /**
+   * One message row: the bubble plus a copy button that appears on hover.
+   * The button is a sibling of the bubble, not a child, so a copied answer is
+   * the answer and not "answer + chrome".
+   */
   renderUserBubble(text) {
     const el = this.msgsEl.createDiv({ cls: "va-msg va-user" });
+    addCopyButton(el, () => text, this.copyLabels());
     el.createDiv({ cls: "va-user-text", text });
     this.scrollBottom();
     return el;
   }
   renderAssistantDone(text) {
     const el = this.msgsEl.createDiv({ cls: "va-msg va-assistant" });
+    addCopyButton(el, () => text, this.copyLabels());
     this.renderMarkdown(el, text);
     this.scrollBottom();
     return el;
@@ -1806,6 +1892,7 @@ var AgentView = class extends import_obsidian2.ItemView {
       finish: (full, reasoning) => {
         el.removeClass("va-streaming");
         textEl.remove();
+        addCopyButton(el, () => full || acc, this.copyLabels());
         const finalReasoning = normalizeReasoning(reasoning || reasoningAcc);
         if (finalReasoning) {
           if (!reasoningEl) {
@@ -1832,7 +1919,7 @@ var AgentView = class extends import_obsidian2.ItemView {
     const chip = this.msgsEl.createDiv({ cls: "va-tool-chip" });
     const summary = chip.createDiv({ cls: "va-tool-summary" });
     const icon = summary.createSpan({ cls: "va-tool-icon" });
-    (0, import_obsidian2.setIcon)(icon, "loader-2");
+    (0, import_obsidian3.setIcon)(icon, "loader-2");
     icon.addClass("va-spinner");
     let argsPreview = "";
     try {
@@ -1856,7 +1943,7 @@ var AgentView = class extends import_obsidian2.ItemView {
       chip.addClass("va-tool-error");
     const icon = chip.querySelector(".va-tool-icon");
     if (icon) {
-      (0, import_obsidian2.setIcon)(icon, result.ok ? "check" : "x");
+      (0, import_obsidian3.setIcon)(icon, result.ok ? "check" : "x");
       icon.removeClass("va-spinner");
     }
     const pre = chip.querySelector(".va-tool-details pre");
@@ -1925,7 +2012,7 @@ var AgentView = class extends import_obsidian2.ItemView {
       return;
     const s = this.plugin.profile;
     if (!s.apiKey.trim()) {
-      new import_obsidian2.Notice(this.st("needApiKey"));
+      new import_obsidian3.Notice(this.st("needApiKey"));
       this.plugin.openSettings();
       return;
     }
@@ -1999,12 +2086,12 @@ var AgentView = class extends import_obsidian2.ItemView {
         ...base,
         nativeSearch: search.native ?? void 0,
         passthroughTools: search.native?.passthrough,
-        onSearchFallback: () => new import_obsidian2.Notice(this.st("searchFallback"))
+        onSearchFallback: () => new import_obsidian3.Notice(this.st("searchFallback"))
       });
       const reply = text.trim() ? text : hitCap ? this.st("maxIterNoAnswer") : this.st("emptyReply");
       stream.finish(reply, reasoning);
       if (hitCap)
-        new import_obsidian2.Notice(this.st("maxIterReached"));
+        new import_obsidian3.Notice(this.st("maxIterReached"));
       this.messages.push({ role: "assistant", content: reply });
       history.assistant(reply, reasoning);
     } catch (e) {
@@ -2014,7 +2101,7 @@ var AgentView = class extends import_obsidian2.ItemView {
       this.messages.push({ role: "assistant", content: msg });
       history.error(msg);
       if (!aborted)
-        new import_obsidian2.Notice(msg.slice(0, 200));
+        new import_obsidian3.Notice(msg.slice(0, 200));
     } finally {
       this.running = false;
       this.stopBtn.disabled = true;
@@ -2031,8 +2118,54 @@ function formatStamp(iso) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
+// magpie.ts
+var MAGPIE_APP_ID = "ai-vault-agent";
+var MAGPIE_KEY = "magpie-" + MAGPIE_APP_ID;
+var MAGPIE_BASE_URL = "http://127.0.0.1:3425/v1";
+function magpieModelsUrl(baseUrl) {
+  const base = (baseUrl || MAGPIE_BASE_URL).trim().replace(/\/+$/, "");
+  if (!base)
+    return MAGPIE_BASE_URL + "/models";
+  return /\/v\d+$/.test(base) ? base + "/models" : base + "/v1/models";
+}
+function asRecord4(v) {
+  return v !== null && typeof v === "object" ? v : null;
+}
+function parseMagpieModels(body) {
+  const root = asRecord4(body);
+  const data = root && Array.isArray(root.data) ? root.data : Array.isArray(body) ? body : [];
+  const out = [];
+  for (const raw of data) {
+    const m = asRecord4(raw);
+    if (!m || typeof m.id !== "string" || !m.id)
+      continue;
+    out.push({
+      id: m.id,
+      displayName: typeof m.display_name === "string" ? m.display_name : void 0,
+      ownedBy: typeof m.owned_by === "string" ? m.owned_by : void 0,
+      contextWindow: typeof m.context_window === "number" ? m.context_window : void 0
+    });
+  }
+  return out;
+}
+function pickDefaultMagpieModel(models, current) {
+  const ids = models.map((m) => m.id);
+  if (current && ids.includes(current))
+    return current;
+  return ids.find((id) => id.startsWith("auto/")) ?? ids.find((id) => id.startsWith("group/")) ?? ids[0] ?? "";
+}
+
 // main.ts
 var PROVIDERS = [
+  {
+    id: "magpie",
+    label: "Magpie \u672C\u5730\u7F51\u5173 (\u672C\u673A)",
+    baseUrl: MAGPIE_BASE_URL,
+    models: [],
+    defaultApiKey: MAGPIE_KEY,
+    catalog: true,
+    hint: "Magpie \u5728\u672C\u673A 127.0.0.1:3425 \u8DD1\u4E00\u4E2A\u7F51\u5173\uFF0C\u628A\u4F60\u5728\u91CC\u9762\u914D\u7F6E\u7684\u8BA2\u9605\u3001API Key \u548C\u8DEF\u7531\u7EC4\u90FD\u53D8\u6210\u6A21\u578B\u3002\u4E0B\u9762\u7684\u6A21\u578B\u5217\u8868\u76F4\u63A5\u4ECE\u7F51\u5173 /v1/models \u8BFB\u53D6\uFF0C\u70B9\u300C\u91CD\u65B0\u8BFB\u53D6\u300D\u5237\u65B0\uFF1BMagpie \u6CA1\u542F\u52A8\u65F6\u8BF7\u6C42\u4F1A\u8FDE\u4E0D\u4E0A\u3002"
+  },
   { id: "deepseek", label: "DeepSeek \u6DF1\u5EA6\u6C42\u7D22", baseUrl: "https://api.deepseek.com/v1", models: ["deepseek-v4.1-flash", "deepseek-v4-pro"], hint: "V4.1 Flash \u7684\u5B98\u65B9\u8C03\u7528\u540D\u4E3A deepseek-flash\uFF08\u540C\u4E00\u6A21\u578B\uFF09\uFF1B\u4EE5 api.deepseek.com \u5B9E\u9645\u8FD4\u56DE\u4E3A\u51C6" },
   { id: "glm", label: "\u667A\u8C31 GLM (bigmodel.cn)", baseUrl: "https://open.bigmodel.cn/api/paas/v4", models: ["glm-4.6", "glm-4.5-air"], hint: "\u6A21\u578B ID \u4EE5 bigmodel.cn \u63A7\u5236\u53F0\u4E3A\u51C6" },
   { id: "zai", label: "Z.ai (GLM \u6D77\u5916\u7248)", baseUrl: "https://api.z.ai/api/paas/v4", models: ["glm-4.6", "glm-4.5-air"] },
@@ -2092,16 +2225,39 @@ function applyProviderPreset(profile, providerId) {
   const preset = PROVIDERS.find((p) => p.id === providerId);
   if (!preset)
     return;
+  profile.providerId = preset.id;
   profile.protocol = preset.protocol ?? "openai";
   profile.baseUrl = preset.baseUrl;
-  if (preset.models.length)
+  if (preset.catalog) {
+    if (!profile.model.includes("/"))
+      profile.model = "";
+  } else if (preset.models.length)
     profile.model = preset.models[0];
+  if (preset.defaultApiKey)
+    profile.apiKey = preset.defaultApiKey;
+  else if (profile.apiKey === MAGPIE_KEY)
+    profile.apiKey = "";
+}
+function reconcileProviderIds(profiles) {
+  const norm = (url) => (url || "").trim().replace(/\/+$/, "");
+  let changed = false;
+  for (const profile of profiles) {
+    const claimed = PROVIDERS.find((p) => p.id === profile.providerId);
+    if (!claimed?.baseUrl || norm(claimed.baseUrl) === norm(profile.baseUrl))
+      continue;
+    const match = PROVIDERS.find((p) => p.baseUrl && norm(p.baseUrl) === norm(profile.baseUrl));
+    if (!match)
+      continue;
+    profile.providerId = match.id;
+    changed = true;
+  }
+  return changed;
 }
 function defaultSettings() {
   const profile = makeProfile("\u9ED8\u8BA4 Agent");
   return { lang: "zh", profiles: [profile], activeProfileId: profile.id, history: [], sessionId: "" };
 }
-var VaultAgentPlugin = class extends import_obsidian3.Plugin {
+var VaultAgentPlugin = class extends import_obsidian4.Plugin {
   constructor() {
     super(...arguments);
     this.settings = defaultSettings();
@@ -2158,6 +2314,55 @@ var VaultAgentPlugin = class extends import_obsidian3.Plugin {
     void this.saveSettings();
     return profile;
   }
+  /**
+   * Ask the Magpie gateway which models the user has enabled. Read through
+   * `requestUrl` so a gateway on another machine (Settings → Share on local
+   * network) and a browser without CORS both work.
+   */
+  async fetchMagpieModels(baseUrl) {
+    const res = await withTimeout(
+      (0, import_obsidian4.requestUrl)({
+        url: magpieModelsUrl(baseUrl),
+        method: "GET",
+        headers: { Authorization: "Bearer " + MAGPIE_KEY },
+        throw: false
+      }),
+      1e4,
+      "magpie models"
+    );
+    if (res.status >= 400)
+      throw new Error(`HTTP ${res.status}`);
+    return parseMagpieModels(JSON.parse(res.text));
+  }
+  /**
+   * One-click Magpie agent: fills the gateway base URL and key, then adopts a
+   * model from the live catalog. When the gateway is down the agent is still
+   * created (the user may start Magpie later) and the caller reports why the
+   * model list is empty.
+   */
+  async createMagpieProfile() {
+    const profile = this.createProfile(t(this.settings.lang, "magpieAgentName"), "magpie");
+    const models = await this.adoptCatalogModel(profile);
+    return { profile, models };
+  }
+  /**
+   * Point a catalog-driven profile at a model the gateway actually lists, and
+   * return the catalog (`null` when the gateway could not be read). Without this
+   * a profile switched to Magpie would keep the previous vendor's model id, which
+   * the gateway does not serve.
+   */
+  async adoptCatalogModel(profile) {
+    try {
+      const models = await this.fetchMagpieModels(profile.baseUrl);
+      const model = pickDefaultMagpieModel(models, profile.model);
+      if (model)
+        profile.model = model;
+      await this.saveSettings();
+      return models;
+    } catch {
+      return null;
+    }
+  }
   /** Copy a profile (keys and all) under a new id, so it can be tweaked separately. */
   duplicateProfile(id) {
     const src = this.settings.profiles.find((p) => p.id === id);
@@ -2204,7 +2409,7 @@ var VaultAgentPlugin = class extends import_obsidian3.Plugin {
   /** Menu of configured agents, anchored to the click or to the view's switcher button. */
   openAgentSwitcher(evt) {
     const s = this.settings;
-    const menu = new import_obsidian3.Menu();
+    const menu = new import_obsidian4.Menu();
     for (const p of s.profiles) {
       menu.addItem((item) => item.setTitle(p.name + (p.model ? " \xB7 " + p.model : "")).setChecked(p.id === s.activeProfileId).onClick(() => this.switchProfile(p.id)));
     }
@@ -2230,7 +2435,7 @@ var VaultAgentPlugin = class extends import_obsidian3.Plugin {
    */
   async fallbackPost(url, headers, body, timeoutMs = 12e4) {
     const res = await withTimeout(
-      (0, import_obsidian3.requestUrl)({ url, method: "POST", headers, body, throw: false }),
+      (0, import_obsidian4.requestUrl)({ url, method: "POST", headers, body, throw: false }),
       timeoutMs,
       "request"
     );
@@ -2245,6 +2450,8 @@ var VaultAgentPlugin = class extends import_obsidian3.Plugin {
       if (data && Array.isArray(data.profiles) && data.profiles.length) {
         const profiles = data.profiles.map((p) => ({ ...PROFILE_DEFAULTS, ...p }));
         const active = profiles.some((p) => p.id === data.activeProfileId) ? data.activeProfileId : profiles[0].id;
+        if (reconcileProviderIds(profiles))
+          migrated = true;
         this.settings = {
           lang: data.lang ?? "zh",
           profiles,
@@ -2308,7 +2515,7 @@ var VaultAgentPlugin = class extends import_obsidian3.Plugin {
   /** `history.jsonl` sits next to `data.json`, inside the plugin folder. */
   historyPath() {
     const dir = this.manifest.dir ?? `.obsidian/plugins/${this.manifest.id}`;
-    return (0, import_obsidian3.normalizePath)(`${dir}/history.jsonl`);
+    return (0, import_obsidian4.normalizePath)(`${dir}/history.jsonl`);
   }
   /**
    * Durable transcript used by `tools/history_db.py`. Unlike `saveHistory`
@@ -2359,7 +2566,7 @@ var VaultAgentPlugin = class extends import_obsidian3.Plugin {
     };
   }
 };
-var ConfirmModal = class extends import_obsidian3.Modal {
+var ConfirmModal = class extends import_obsidian4.Modal {
   constructor(app, lines, labels, onConfirm) {
     super(app);
     this.lines = lines;
@@ -2380,10 +2587,28 @@ var ConfirmModal = class extends import_obsidian3.Modal {
     this.contentEl.empty();
   }
 };
-var VASettingTab = class extends import_obsidian3.PluginSettingTab {
+var VASettingTab = class extends import_obsidian4.PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
     this.plugin = plugin;
+    // ------------------------------------------------------ model chips
+    /**
+     * Magpie's catalog as last read, keyed by the base URL it came from: another
+     * agent (or an edited base URL) means another gateway, so a stale list must
+     * never be shown as if it belonged to the current one.
+     */
+    this.magpieCache = null;
+    this.magpieLoading = false;
+    /** Base URL whose read failed, so rendering does not retry on every paint. */
+    this.magpieFailedUrl = "";
+    /**
+     * The chip row currently in the settings tab. A read started by one render can
+     * finish after Obsidian rebuilt the row (changing a setting re-renders the tab),
+     * so the result is painted into whichever row is live instead of the one that
+     * asked for it.
+     */
+    this.liveChipEl = null;
+    this.baseUrlTimer = 0;
   }
   st(key) {
     return t(this.plugin.settings.lang, key);
@@ -2393,7 +2618,7 @@ var VASettingTab = class extends import_obsidian3.PluginSettingTab {
   }
   /** Re-render: declarative tabs (1.13+) refresh via update(), older ones via display(). */
   refreshTab() {
-    if ((0, import_obsidian3.requireApiVersion)("1.13.0")) {
+    if ((0, import_obsidian4.requireApiVersion)("1.13.0")) {
       this.update();
       return;
     }
@@ -2425,14 +2650,14 @@ var VASettingTab = class extends import_obsidian3.PluginSettingTab {
         row.createSpan({ cls: "va-agent-badge", text: this.st("agentActiveBadge") });
       const actions = row.createDiv({ cls: "va-agent-actions" });
       const dup = actions.createEl("button", { cls: "va-icon-btn", attr: { "aria-label": this.st("duplicateAgent"), title: this.st("duplicateAgent") } });
-      (0, import_obsidian3.setIcon)(dup, "copy");
+      (0, import_obsidian4.setIcon)(dup, "copy");
       dup.addEventListener("click", (e) => {
         e.stopPropagation();
         this.plugin.duplicateProfile(p.id);
         this.refreshTab();
       });
       const del = actions.createEl("button", { cls: "va-icon-btn", attr: { "aria-label": this.st("deleteAgent"), title: this.st("deleteAgent") } });
-      (0, import_obsidian3.setIcon)(del, "trash-2");
+      (0, import_obsidian4.setIcon)(del, "trash-2");
       del.addEventListener("click", (e) => {
         e.stopPropagation();
         this.deleteAgent(p.id);
@@ -2450,15 +2675,31 @@ var VASettingTab = class extends import_obsidian3.PluginSettingTab {
       this.plugin.createProfile();
       this.refreshTab();
     });
+    const magpie = buttons.createEl("button", { text: "\u{1FA84} " + this.st("magpieTemplate") });
+    magpie.addEventListener("click", () => {
+      magpie.disabled = true;
+      void this.plugin.createMagpieProfile().then(({ profile, models }) => {
+        if (models === null)
+          new import_obsidian4.Notice(this.magpieUnreachable(profile.baseUrl));
+        else if (!models.length)
+          new import_obsidian4.Notice(this.st("magpieModelsEmpty"));
+        else
+          new import_obsidian4.Notice(tf(this.plugin.lang, "magpieModelPicked", { model: profile.model }));
+        this.refreshTab();
+      });
+    });
     const tpl = buttons.createEl("button", { text: "\u26A1 " + this.st("codingPlanTemplate") });
     tpl.addEventListener("click", () => {
       this.plugin.createProfile(this.st("codingAgentName"), "ark-coding");
       this.refreshTab();
     });
   }
+  magpieUnreachable(baseUrl) {
+    return tf(this.plugin.lang, "magpieUnreachable", { url: magpieModelsUrl(baseUrl) });
+  }
   deleteAgent(id) {
     if (this.plugin.settings.profiles.length <= 1) {
-      new import_obsidian3.Notice(this.st("deleteLastAgent"));
+      new import_obsidian4.Notice(this.st("deleteLastAgent"));
       return;
     }
     const p = this.plugin.settings.profiles.find((x) => x.id === id);
@@ -2531,22 +2772,14 @@ var VASettingTab = class extends import_obsidian3.PluginSettingTab {
         control: { type: "text", key: "model" }
       },
       {
-        name: this.st("modelPreset"),
+        // The Magpie row is a live catalog, not a fixed list of presets.
+        name: this.preset?.catalog ? this.st("magpieModels") : this.st("modelPreset"),
         searchable: false,
-        visible: () => !!PROVIDERS.find((p) => p.id === this.profile.providerId)?.models.length,
+        visible: () => this.hasModelChips(),
         render: (setting) => {
-          const preset = PROVIDERS.find((p) => p.id === this.profile.providerId);
-          for (const m of preset?.models ?? []) {
-            const btn = setting.controlEl.createEl("button", { text: m });
-            if (m === this.profile.model)
-              btn.addClass("va-chip-active");
-            btn.addEventListener("click", () => {
-              this.profile.model = m;
-              void this.plugin.saveSettings();
-              setting.controlEl.querySelectorAll("button").forEach((b) => b.removeClass("va-chip-active"));
-              btn.addClass("va-chip-active");
-            });
-          }
+          setting.settingEl.addClass("va-model-chips");
+          const el = setting.controlEl.createDiv({ cls: "va-model-chip-row" });
+          this.renderModelChips(el);
           return () => setting.controlEl.empty();
         }
       },
@@ -2664,84 +2897,96 @@ var VASettingTab = class extends import_obsidian3.PluginSettingTab {
     const s = this.profile;
     s[key] = value;
     await this.plugin.saveSettings();
+    if (key === "baseUrl" && this.preset?.catalog) {
+      window.clearTimeout(this.baseUrlTimer);
+      this.baseUrlTimer = window.setTimeout(() => {
+        const el = this.liveChipEl;
+        if (el?.isConnected)
+          this.renderModelChips(el);
+      }, 700);
+    }
     if (key === "providerId" && typeof value === "string") {
       applyProviderPreset(s, value);
       await this.plugin.saveSettings();
-      window.setTimeout(() => this.refreshTab(), 0);
+      if (this.preset?.catalog)
+        void this.plugin.adoptCatalogModel(s).then(() => this.refreshTab());
+      else
+        window.setTimeout(() => this.refreshTab(), 0);
     }
   }
   display() {
     const { containerEl } = this;
     containerEl.empty();
     const s = this.profile;
-    new import_obsidian3.Setting(containerEl).setName(this.st("settingsHeading")).setHeading();
-    new import_obsidian3.Setting(containerEl).setName(this.st("language")).setDesc(this.st("languageDesc")).addDropdown((d) => d.addOption("zh", "\u4E2D\u6587").addOption("en", "English").setValue(this.plugin.settings.lang).onChange(async (v) => {
+    new import_obsidian4.Setting(containerEl).setName(this.st("settingsHeading")).setHeading();
+    new import_obsidian4.Setting(containerEl).setName(this.st("language")).setDesc(this.st("languageDesc")).addDropdown((d) => d.addOption("zh", "\u4E2D\u6587").addOption("en", "English").setValue(this.plugin.settings.lang).onChange(async (v) => {
       this.plugin.settings.lang = v;
       await this.plugin.saveSettings();
       this.refreshTab();
     }));
-    const agentsSetting = new import_obsidian3.Setting(containerEl).setName(this.st("agentsHeading")).setDesc(this.st("agentsHeadingDesc")).setClass("va-agents-setting");
+    const agentsSetting = new import_obsidian4.Setting(containerEl).setName(this.st("agentsHeading")).setDesc(this.st("agentsHeadingDesc")).setClass("va-agents-setting");
     this.renderAgentManager(agentsSetting.controlEl.createDiv({ cls: "va-agents" }));
-    const agentHead = new import_obsidian3.Setting(containerEl).setClass("va-hint");
+    const agentHead = new import_obsidian4.Setting(containerEl).setClass("va-hint");
     agentHead.nameEl.setText("\u2699\uFE0F " + this.st("editingAgent") + " \xB7 " + s.name);
     const providerNames = PROVIDERS.map((p) => [p.id, p.label]);
-    new import_obsidian3.Setting(containerEl).setName(this.st("provider")).setDesc(this.st("providerDesc")).addDropdown((d) => {
+    new import_obsidian4.Setting(containerEl).setName(this.st("provider")).setDesc(this.st("providerDesc")).addDropdown((d) => {
       for (const [id, label] of providerNames)
         d.addOption(id, label);
       d.setValue(s.providerId).onChange(async (v) => {
         applyProviderPreset(s, v);
-        s.providerId = v;
         await this.plugin.saveSettings();
+        if (PROVIDERS.find((p) => p.id === v)?.catalog)
+          await this.plugin.adoptCatalogModel(s);
         this.refreshTab();
       });
     });
-    new import_obsidian3.Setting(containerEl).setName(this.st("baseUrl")).addText((tx) => tx.setValue(s.baseUrl).onChange(async (v) => {
+    new import_obsidian4.Setting(containerEl).setName(this.st("baseUrl")).addText((tx) => tx.setValue(s.baseUrl).onChange(async (v) => {
       s.baseUrl = v.trim();
       await this.plugin.saveSettings();
     }));
-    new import_obsidian3.Setting(containerEl).setName(this.st("apiKey")).setDesc(this.st("apiKeyDesc")).addText((tx) => {
+    new import_obsidian4.Setting(containerEl).setName(this.st("apiKey")).setDesc(this.st("apiKeyDesc")).addText((tx) => {
       tx.inputEl.type = "password";
       tx.setValue(s.apiKey).onChange(async (v) => {
         s.apiKey = v.trim();
         await this.plugin.saveSettings();
       });
     });
-    new import_obsidian3.Setting(containerEl).setName(this.st("proxy")).setDesc(this.st("proxyDesc")).addText((tx) => tx.setValue(s.proxyUrl).onChange(async (v) => {
+    new import_obsidian4.Setting(containerEl).setName(this.st("proxy")).setDesc(this.st("proxyDesc")).addText((tx) => tx.setValue(s.proxyUrl).onChange(async (v) => {
       s.proxyUrl = v.trim();
       await this.plugin.saveSettings();
     }));
-    new import_obsidian3.Setting(containerEl).setName(this.st("model")).setDesc(this.st("modelDesc")).addText((tx) => tx.setValue(s.model).onChange(async (v) => {
+    new import_obsidian4.Setting(containerEl).setName(this.st("model")).setDesc(this.st("modelDesc")).addText((tx) => tx.setValue(s.model).onChange(async (v) => {
       s.model = v.trim();
       await this.plugin.saveSettings();
     }));
     this.renderProviderExtras(containerEl);
-    new import_obsidian3.Setting(containerEl).setName(this.st("temperature")).addSlider((sl) => sl.setLimits(0, 2, 0.1).setValue(s.temperature).onChange(async (v) => {
+    new import_obsidian4.Setting(containerEl).setName(this.st("temperature")).addSlider((sl) => sl.setLimits(0, 2, 0.1).setValue(s.temperature).onChange(async (v) => {
       s.temperature = v;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian3.Setting(containerEl).setName(this.st("maxTokens")).addText((tx) => tx.setValue(String(s.maxTokens)).onChange(async (v) => {
+    new import_obsidian4.Setting(containerEl).setName(this.st("maxTokens")).addText((tx) => tx.setValue(String(s.maxTokens)).onChange(async (v) => {
       const n = parseInt(v, 10);
       if (n > 0) {
         s.maxTokens = n;
         await this.plugin.saveSettings();
       }
     }));
-    new import_obsidian3.Setting(containerEl).setName(this.st("maxIterations")).addText((tx) => tx.setValue(String(s.maxIterations)).onChange(async (v) => {
+    new import_obsidian4.Setting(containerEl).setName(this.st("maxIterations")).addText((tx) => tx.setValue(String(s.maxIterations)).onChange(async (v) => {
       const n = parseInt(v, 10);
       if (n > 0) {
         s.maxIterations = n;
         await this.plugin.saveSettings();
       }
     }));
-    new import_obsidian3.Setting(containerEl).setName(this.st("autoContext")).setDesc(this.st("autoContextDesc")).addToggle((tg) => tg.setValue(s.autoContext).onChange(async (v) => {
+    new import_obsidian4.Setting(containerEl).setName(this.st("autoContext")).setDesc(this.st("autoContextDesc")).addToggle((tg) => tg.setValue(s.autoContext).onChange(async (v) => {
       s.autoContext = v;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian3.Setting(containerEl).setName(this.st("autoApprove")).setDesc(this.st("autoApproveDesc")).addToggle((tg) => tg.setValue(s.autoApprove).onChange(async (v) => {
+    new import_obsidian4.Setting(containerEl).setName(this.st("autoApprove")).setDesc(this.st("autoApproveDesc")).addToggle((tg) => tg.setValue(s.autoApprove).onChange(async (v) => {
       s.autoApprove = v;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian3.Setting(containerEl).setName(this.st("systemPrompt")).setDesc(this.st("systemPromptDesc")).addTextArea((ta) => ta.setValue(s.systemPrompt).onChange(async (v) => {
+    new import_obsidian4.Setting(containerEl).setName(this.st("systemPrompt")).setDesc(this.st("systemPromptDesc")).addTextArea((ta) => ta.setValue(s.systemPrompt).onChange(async (v) => {
       s.systemPrompt = v;
       await this.plugin.saveSettings();
     }));
@@ -2757,59 +3002,122 @@ var VASettingTab = class extends import_obsidian3.PluginSettingTab {
     el.empty();
     const usesTool = () => ["auto", "tool"].includes(s.searchMode);
     const rerender = () => this.renderSearchSettings(el);
-    new import_obsidian3.Setting(el).setName(this.st("searchMode")).setDesc(this.st("searchModeDesc")).addDropdown((d) => d.addOption("off", this.st("searchModeOff")).addOption("auto", this.st("searchModeAuto")).addOption("native", this.st("searchModeNative")).addOption("tool", this.st("searchModeTool")).setValue(s.searchMode).onChange(async (v) => {
+    new import_obsidian4.Setting(el).setName(this.st("searchMode")).setDesc(this.st("searchModeDesc")).addDropdown((d) => d.addOption("off", this.st("searchModeOff")).addOption("auto", this.st("searchModeAuto")).addOption("native", this.st("searchModeNative")).addOption("tool", this.st("searchModeTool")).setValue(s.searchMode).onChange(async (v) => {
       s.searchMode = v;
       await this.plugin.saveSettings();
       rerender();
     }));
     if (s.searchMode === "native" && !nativeSearchFor(s.providerId, s.searchMaxResults)) {
-      const hint = new import_obsidian3.Setting(el).setClass("va-hint");
+      const hint = new import_obsidian4.Setting(el).setClass("va-hint");
       hint.nameEl.setText("\u26A0\uFE0F " + this.st("searchUnsupported"));
     }
     if (!usesTool())
       return;
-    new import_obsidian3.Setting(el).setName(this.st("searchApiKey")).setDesc(this.st("searchApiKeyDesc")).addText((tx) => {
+    new import_obsidian4.Setting(el).setName(this.st("searchApiKey")).setDesc(this.st("searchApiKeyDesc")).addText((tx) => {
       tx.inputEl.type = "password";
       tx.setValue(s.searchApiKey).onChange(async (v) => {
         s.searchApiKey = v.trim();
         await this.plugin.saveSettings();
       });
     });
-    new import_obsidian3.Setting(el).setName(this.st("searchMaxResults")).addText((tx) => tx.setValue(String(s.searchMaxResults)).onChange(async (v) => {
+    new import_obsidian4.Setting(el).setName(this.st("searchMaxResults")).addText((tx) => tx.setValue(String(s.searchMaxResults)).onChange(async (v) => {
       const n = parseInt(v, 10);
       if (n >= 1 && n <= 20) {
         s.searchMaxResults = n;
         await this.plugin.saveSettings();
       }
     }));
-    new import_obsidian3.Setting(el).setName(this.st("searchDepth")).addDropdown((d) => d.addOption("basic", this.st("searchDepthBasic")).addOption("advanced", this.st("searchDepthAdvanced")).setValue(s.searchDepth).onChange(async (v) => {
+    new import_obsidian4.Setting(el).setName(this.st("searchDepth")).addDropdown((d) => d.addOption("basic", this.st("searchDepthBasic")).addOption("advanced", this.st("searchDepthAdvanced")).setValue(s.searchDepth).onChange(async (v) => {
       s.searchDepth = v;
       await this.plugin.saveSettings();
     }));
   }
-  /** Provider hint + model preset chips; re-rendered in place when the provider changes. */
+  /** Provider hint + model chips; re-rendered in place when the provider changes. */
   renderProviderExtras(containerEl) {
-    const s = this.profile;
-    const preset = PROVIDERS.find((p) => p.id === s.providerId);
+    const preset = PROVIDERS.find((p) => p.id === this.profile.providerId);
     if (preset?.hint) {
-      const hint = new import_obsidian3.Setting(containerEl).setClass("va-hint");
+      const hint = new import_obsidian4.Setting(containerEl).setClass("va-hint");
       hint.nameEl.setText("\u2139\uFE0F " + preset.hint);
     }
-    if (!preset?.models.length)
+    if (!this.hasModelChips())
       return;
-    const presets = new import_obsidian3.Setting(containerEl).setName(this.st("modelPreset")).setClass("va-model-chips");
-    for (const m of preset.models) {
-      presets.addButton((b) => {
-        b.setButtonText(m);
-        if (s.model === m)
-          b.buttonEl.addClass("va-chip-active");
-        b.onClick(async () => {
-          s.model = m;
-          await this.plugin.saveSettings();
-          presets.controlEl.querySelectorAll("button").forEach((el) => el.removeClass("va-chip-active"));
-          b.buttonEl.addClass("va-chip-active");
-        });
-      });
+    const title = this.preset?.catalog ? this.st("magpieModels") : this.st("modelPreset");
+    const row = new import_obsidian4.Setting(containerEl).setName(title).setClass("va-model-chips");
+    this.renderModelChips(row.controlEl.createDiv({ cls: "va-model-chip-row" }));
+  }
+  get preset() {
+    return PROVIDERS.find((p) => p.id === this.profile.providerId);
+  }
+  hasModelChips() {
+    const preset = this.preset;
+    return !!preset && (!!preset.catalog || preset.models.length > 0);
+  }
+  /**
+   * Clickable model chips for the current agent. Curated providers use their
+   * fixed list; Magpie's list is read from the gateway, because the user adds
+   * and removes providers inside Magpie rather than in this plugin.
+   */
+  renderModelChips(el) {
+    el.empty();
+    const profile = this.profile;
+    const preset = this.preset;
+    if (!preset?.catalog) {
+      for (const m of preset?.models ?? [])
+        this.addModelChip(el, m, m);
+      return;
     }
+    const url = magpieModelsUrl(profile.baseUrl);
+    const models = this.magpieCache?.url === url ? this.magpieCache.models : null;
+    this.liveChipEl = el;
+    const bar = el.createDiv({ cls: "va-chip-bar" });
+    const reload = bar.createEl("button", { text: this.st("magpieModelsRefresh") });
+    reload.addEventListener("click", () => {
+      this.magpieCache = null;
+      this.magpieFailedUrl = "";
+      void this.loadMagpieModels(el);
+    });
+    const status = bar.createSpan({ cls: "va-chip-status" });
+    if (this.magpieLoading)
+      status.setText(this.st("magpieModelsLoading"));
+    else if (this.magpieFailedUrl === url)
+      status.setText(this.magpieUnreachable(profile.baseUrl));
+    else if (models && !models.length)
+      status.setText(this.st("magpieModelsEmpty"));
+    else if (models)
+      status.setText(tf(this.plugin.lang, "magpieModelsLoaded", { n: models.length }));
+    for (const m of models ?? []) {
+      this.addModelChip(el, m.id, m.displayName ? `${m.displayName} \xB7 ${m.id}` : m.id);
+    }
+    if (!models && !this.magpieLoading && this.magpieFailedUrl !== url)
+      void this.loadMagpieModels(el);
+  }
+  addModelChip(el, modelId, label) {
+    const btn = el.createEl("button", { text: label, attr: { title: modelId } });
+    if (modelId === this.profile.model)
+      btn.addClass("va-chip-active");
+    btn.addEventListener("click", () => {
+      this.profile.model = modelId;
+      void this.plugin.saveSettings();
+      el.querySelectorAll("button").forEach((b) => b.removeClass("va-chip-active"));
+      btn.addClass("va-chip-active");
+    });
+  }
+  async loadMagpieModels(el) {
+    const url = magpieModelsUrl(this.profile.baseUrl);
+    this.magpieLoading = true;
+    this.renderModelChips(el);
+    try {
+      const models = await this.plugin.fetchMagpieModels(this.profile.baseUrl);
+      this.magpieCache = { url, models };
+      this.magpieFailedUrl = "";
+    } catch {
+      this.magpieCache = null;
+      this.magpieFailedUrl = url;
+    } finally {
+      this.magpieLoading = false;
+    }
+    const live = this.liveChipEl;
+    if (live?.isConnected)
+      this.renderModelChips(live);
   }
 };

@@ -1,17 +1,29 @@
 export type Lang = 'zh' | 'en';
 
 const zh = {
-	viewName: 'Vault Agent',
+	viewName: 'AI Vault Agent CN',
 	viewIcon: 'bot-message-square',
 	newChat: '新对话',
 	stop: '停止',
 	send: '发送',
 	inputPlaceholder: '向智能体提问，或让它操作你的笔记…（Enter 发送，Shift+Enter 换行）',
-	welcome: '我是你的 vault 智能体。可以直接问我问题，也可以让我**搜索、创建、修改**笔记。\n\n开始前请在设置中填入模型服务商的 API Key（支持 DeepSeek / 智谱 GLM / Kimi / 通义 Qwen / 火山方舟 / 腾讯混元 / Hermes(Nous) / OpenRouter 或任意 OpenAI 兼容端点）。\n\n支持配置**多个 Agent**（如火山方舟 Coding Plan 的豆包编程模型），点标题栏即可快速切换；所有 Agent 共享当前对话。',
+	welcome: '我是你的 vault 智能体。可以直接问我问题，也可以让我**搜索、创建、修改**笔记。\n\n开始前请在设置中填入模型服务商的 API Key（支持 DeepSeek / 智谱 GLM / Kimi / 通义 Qwen / 火山方舟 / 腾讯混元 / Hermes(Nous) / OpenRouter 或任意 OpenAI 兼容端点）。\n\n支持配置**多个 Agent**（如火山方舟 Coding Plan 的豆包编程模型，或用 Magpie 本地网关一键接入本机所有订阅），点标题栏即可快速切换；所有 Agent 共享当前对话。',
 	agentsHeading: '智能体 (Agents)',
 	agentsHeadingDesc: '每个 Agent 保存各自的服务商、Key 与提示词；对话全局共享，切换 Agent 不换上下文。',
 	newAgent: '新建空白 Agent',
 	codingPlanTemplate: '用火山 Coding Plan 模板新建',
+	magpieTemplate: '用 Magpie 模板一键新建',
+	magpieAgentName: 'Magpie 网关',
+	magpieModels: 'Magpie 模型（从网关实时读取）',
+	magpieModelsRefresh: '重新读取',
+	magpieModelsLoading: '正在读取网关模型列表…',
+	magpieModelsEmpty: '网关没有返回任何模型。请先在 Magpie 的 Providers 里启用至少一个服务商。',
+	magpieModelsLoaded: '已读取 {n} 个模型',
+	magpieUnreachable: '连不上 Magpie 网关（{url}）。请确认 Magpie 已启动，或把 Base URL 改成网关实际端口。',
+	magpieModelPicked: 'Magpie Agent 已创建，模型：{model}',
+	copyMessage: '复制这条消息',
+	copied: '已复制',
+	copyFailed: '复制失败',
 	defaultAgentName: '默认 Agent',
 	codingAgentName: '火山 Coding Plan',
 	newAgentName: '新 Agent',
@@ -39,7 +51,7 @@ const zh = {
 	streaming: '生成中…',
 	errPrefix: '请求失败',
 	maxIterReached: '已达单轮工具调用上限，请继续对话让它接着做。',
-	settingsHeading: 'Vault Agent',
+	settingsHeading: 'AI Vault Agent CN',
 	provider: '模型服务商',
 	providerDesc: '选择服务商后自动填充 API 地址，可再手动修改。Trae 同源（火山方舟）、Qoder 同源（通义）、WorkBuddy 同源（腾讯混元）等均可直连。',
 	baseUrl: 'API 地址 (Base URL)',
@@ -97,17 +109,29 @@ const zh = {
 type Dict = Record<keyof typeof zh, string>;
 
 const en: Dict = {
-	viewName: 'Vault Agent',
+	viewName: 'AI Vault Agent CN',
 	viewIcon: 'bot-message-square',
 	newChat: 'New chat',
 	stop: 'Stop',
 	send: 'Send',
 	inputPlaceholder: 'Ask the agent, or have it work on your notes… (Enter to send, Shift+Enter for newline)',
-	welcome: "I'm your vault agent. Ask me anything, or have me **search, create, and edit** notes.\n\nPick a provider and paste an API key in settings (DeepSeek / GLM / Kimi / Qwen / Volcengine Ark / Tencent Hunyuan / Hermes(Nous) / OpenRouter / any OpenAI-compatible endpoint).\n\nYou can configure **multiple agents** (e.g. the Doubao coding model via Volcengine Coding Plan) and switch instantly from the header; the conversation is shared.",
+	welcome: "I'm your vault agent. Ask me anything, or have me **search, create, and edit** notes.\n\nPick a provider and paste an API key in settings (DeepSeek / GLM / Kimi / Qwen / Volcengine Ark / Tencent Hunyuan / Hermes(Nous) / OpenRouter / any OpenAI-compatible endpoint).\n\nYou can configure **multiple agents** (e.g. the Doubao coding model via Volcengine Coding Plan, or a one-click Magpie gateway agent that reaches every subscription on this machine) and switch instantly from the header; the conversation is shared.",
 	agentsHeading: 'Agents',
 	agentsHeadingDesc: 'Each agent keeps its own provider, key and prompts; the conversation is shared, so switching keeps the context.',
 	newAgent: 'New blank agent',
 	codingPlanTemplate: 'New from Volcengine Coding Plan template',
+	magpieTemplate: 'New from Magpie template',
+	magpieAgentName: 'Magpie gateway',
+	magpieModels: 'Magpie models (read live from the gateway)',
+	magpieModelsRefresh: 'Reload',
+	magpieModelsLoading: 'Reading the gateway model list…',
+	magpieModelsEmpty: 'The gateway returned no models. Enable at least one provider in Magpie first.',
+	magpieModelsLoaded: '{n} models loaded',
+	magpieUnreachable: 'Cannot reach the Magpie gateway ({url}). Check that Magpie is running, or point Base URL at its actual port.',
+	magpieModelPicked: 'Magpie agent created, model: {model}',
+	copyMessage: 'Copy this message',
+	copied: 'Copied',
+	copyFailed: 'Copy failed',
 	defaultAgentName: 'Default agent',
 	codingAgentName: 'Volcengine Coding Plan',
 	newAgentName: 'New agent',
@@ -135,7 +159,7 @@ const en: Dict = {
 	streaming: 'Generating…',
 	errPrefix: 'Request failed',
 	maxIterReached: 'Tool-call limit for this turn reached — keep chatting to continue.',
-	settingsHeading: 'Vault Agent',
+	settingsHeading: 'AI Vault Agent CN',
 	provider: 'Provider',
 	providerDesc: 'Base URL is auto-filled when you pick a provider; adjust freely. Volcengine Ark (Trae), DashScope (Qoder), Tencent Hunyuan (WorkBuddy) connect directly.',
 	baseUrl: 'API base URL',
@@ -194,4 +218,9 @@ export const STRINGS: Record<Lang, Dict> = { zh, en };
 
 export function t(lang: Lang, key: keyof typeof zh): string {
 	return STRINGS[lang][key];
+}
+
+/** Same as `t`, for strings that carry `{name}` placeholders. */
+export function tf(lang: Lang, key: keyof typeof zh, vars: Record<string, string | number>): string {
+	return t(lang, key).replace(/\{(\w+)\}/g, (m, name: string) => (name in vars ? String(vars[name]) : m));
 }

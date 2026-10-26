@@ -1,10 +1,10 @@
-# Vault Agent
+# AI Vault Agent CN
 
 [中文](README.md) · [GitHub](https://github.com/yanqingwang/opensource-AI-vault-agent) · [MIT License](LICENSE)
 
 A China-first Obsidian agent plugin that talks directly to OpenAI-compatible and Anthropic Messages LLM APIs and can autonomously **search, read, create and edit** your notes. No CLI to install, no overseas account, no environment variables to configure. Configure **multiple agents** (each with its own provider, key and prompt) and switch between them from the header.
 
-**Current version: v0.2.1**
+**Current version: v0.3.0**
 
 ## Why
 
@@ -12,6 +12,7 @@ The closest equivalent overseas ([Claudian](https://github.com/yishentu/claudian
 
 | What you want | Pick this preset |
 |---|---|
+| Your local Magpie gateway (one entry for every subscription, key and routing group) | `Magpie 本地网关 (本机)`, or **New from Magpie template** |
 | DeepSeek | `DeepSeek` |
 | Zhipu GLM / Z.ai | `智谱 GLM` / `Z.ai` |
 | Kimi (Moonshot) | `Kimi` |
@@ -37,10 +38,12 @@ The closest equivalent overseas ([Claudian](https://github.com/yishentu/claudian
 - **History, kept and searchable**: recent messages are saved and restored after a restart; the sidebar **History** button searches past conversations and loads one back into the chat, and the full transcript is kept in `history.jsonl` (see below).
 - **Multiple agents, instant switching**: each agent keeps its own provider, base URL, API key, model, generation settings, system prompt and search config; the header switcher (or the "Switch agent" command) swaps agents on the fly, keeping the conversation.
 - **Anthropic Messages protocol**: alongside the OpenAI-compatible protocol, Anthropic Messages (`POST /v1/messages`) is supported, so Anthropic-compatible endpoints such as Volcengine Ark's Coding Plan work directly.
+- **Magpie gateway (one-click template)**: one button creates an agent wired to the Magpie gateway, and the model list is read live from its `/v1/models` instead of being typed by hand.
+- **Copyable messages**: every user message and answer carries a copy button (shown on hover); clicking it copies that message as plain text/Markdown and flips the icon to a check.
 
 ## Multiple agents and Volcengine Ark Coding Plan
 
-Settings → Vault Agent → the **Agents** section manages your agents:
+Settings → AI Vault Agent CN → the **Agents** section manages your agents:
 
 - **New blank agent**: start from defaults, pick a provider and paste a key.
 - **New from Volcengine Coding Plan template**: pre-fills the Anthropic protocol, base URL `https://ark.cn-beijing.volces.com/api/coding` and model `doubao-seed-code-preview-latest` — just paste the plan's API key.
@@ -57,20 +60,45 @@ Settings → Vault Agent → the **Agents** section manages your agents:
 
 Switching agents **keeps the conversation**; the next message goes to the new agent, and the history panel tags each session with the agent that produced it.
 
+## Magpie gateway (one-click template)
+
+[Magpie](https://usemagpie.ai) is a local AI gateway (default `127.0.0.1:3425`) that turns the subscriptions, vendor API keys and routing groups you configured inside it into one catalog of `provider/model` ids, and speaks OpenAI Chat and Anthropic Messages itself. To this plugin it is **a single provider**, not one configuration per vendor.
+
+Settings → AI Vault Agent CN → Agents → **New from Magpie template**:
+
+1. An agent is created with base URL `http://127.0.0.1:3425/v1` and API key `magpie-ai-vault-agent`.
+2. The plugin then reads `GET /v1/models` from the gateway and picks a model: `auto/…` (Magpie's own routing) first, then a `group/…` routing group, then the first enabled model.
+3. Those models are listed under **Model ID** — click one to switch; press **Reload** after changing anything in Magpie.
+
+Boundaries worth knowing:
+
+- **Nothing is sent while the gateway is down** (`net::ERR_CONNECTION_REFUSED`). When Magpie is off, switch to another agent.
+- **The key is not a secret.** The local gateway accepts any key; `magpie-ai-vault-agent` only makes Magpie's usage page and routing rules attribute this client to `ai-vault-agent`. Switching to a real vendor clears it, so it can never be mistaken for a credential.
+- **The port can move.** If you change `port` in Magpie's `settings.json`, change the base URL to match; Magpie's "share on the local network" address works too.
+- Model ids are Magpie's `provider/model` (or a routing group name) exactly as `/v1/models` returns them; this plugin ships no fixed list.
+
+## Installation
+
+**Community plugins**: Settings → Community plugins → Browse → search for **AI Vault Agent CN** → Install, then Enable.
+
+**Manual**: copy `main.js`, `manifest.json` and `styles.css` into `<vault>/.obsidian/plugins/vault-agent/`, restart Obsidian and enable the plugin.
+
+**Requirements**: Obsidian 1.7.2 or newer; works on desktop and mobile (the local proxy is desktop-only).
+
 ## Usage
 
-1. Settings → Vault Agent → in **Agents**, create or pick an agent → pick a provider → paste your API key → pick a model.
-2. Click the ribbon icon (or run "Open Vault Agent" from the command palette) to open the chat sidebar.
+1. Settings → AI Vault Agent CN → in **Agents**, create or pick an agent → pick a provider → paste your API key → pick a model.
+2. Click the ribbon icon (or run "打开智能体 / open agent" from the command palette) to open the chat sidebar.
 3. For example: "find my recent notes about X and turn them into a MOC", "rewrite the end of the current note as a summary paragraph".
 4. Click the **History** icon in the header to search past conversations; click a row to load it back and keep chatting.
 
 ## Local proxy
 
-Settings → Vault Agent → **Local proxy (optional)**: enter `host:port` (e.g. `http://127.0.0.1:9000`, or `user:pass@host:port` when the proxy needs authentication) and AI requests go through it — handy for inspecting traffic with a local proxy or for relaying on a restricted network. Leave it empty to connect directly. Desktop only; SOCKS is not supported.
+Settings → AI Vault Agent CN → **Local proxy (optional)**: enter `host:port` (e.g. `http://127.0.0.1:9000`, or `user:pass@host:port` when the proxy needs authentication) and AI requests go through it — handy for inspecting traffic with a local proxy or for relaying on a restricted network. Leave it empty to connect directly. Desktop only; SOCKS is not supported.
 
 ## Web search
 
-A model's training data has a cut-off, and your notes may not cover recent events. Settings → Vault Agent → **Web search** has four modes:
+A model's training data has a cut-off, and your notes may not cover recent events. Settings → AI Vault Agent CN → **Web search** has four modes:
 
 | Mode | Behaviour |
 |---|---|
@@ -118,6 +146,13 @@ npm install
 npm run build   # tsc check + esbuild -> main.js
 npm test        # node end-to-end tests (mock SSE server + agent loop + history recorder)
 ```
+
+## Feedback
+
+- GitHub Issues: <https://github.com/yanqingwang/opensource-AI-vault-agent/issues>
+- Email: 289631530@qq.com
+
+Please include your Obsidian version, the plugin version, a description or screenshot of the problem, and what you expected to happen.
 
 ## License
 

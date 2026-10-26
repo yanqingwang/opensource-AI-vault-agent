@@ -1,16 +1,16 @@
-# Vault Agent
+# AI Vault Agent CN
 
 [English](README.en.md) · [GitHub](https://github.com/yanqingwang/opensource-AI-vault-agent) · [MIT License](LICENSE)
 
-**Vault Agent** is an Obsidian plugin that turns your vault into an agentic workspace. It talks directly to LLM APIs that are usable from mainland China — DeepSeek, Zhipu GLM, Kimi (Moonshot), Qwen (DashScope), Volcengine Ark / Ark Coding Plan (Doubao-Seed-Code) and Tencent Hunyuan — as well as any OpenAI- or Anthropic-compatible endpoint. You can configure several agents (each with its own provider, API key and prompt) and switch between them from the view header. The agent can search, read, create and edit your notes on its own. No CLI, no overseas account and no environment variables required.
+**AI Vault Agent CN** is an Obsidian plugin that turns your vault into an agentic workspace. It talks directly to LLM APIs that are usable from mainland China — DeepSeek, Zhipu GLM, Kimi (Moonshot), Qwen (DashScope), Volcengine Ark / Ark Coding Plan (Doubao-Seed-Code) and Tencent Hunyuan — as well as any OpenAI- or Anthropic-compatible endpoint. You can configure several agents (each with its own provider, API key and prompt) and switch between them from the view header. The agent can search, read, create and edit your notes on its own. No CLI, no overseas account and no environment variables required.
 
-> Chinese-first: the UI and the notes below are written in Chinese by default, but an English UI and a full English README are included. Switch the language in Settings → Vault Agent → Language. See [README.en.md](README.en.md) for the complete English documentation.
+> Chinese-first: the UI and the notes below are written in Chinese by default, but an English UI and a full English README are included. Switch the language in Settings → AI Vault Agent CN → Language. See [README.en.md](README.en.md) for the complete English documentation.
 
 ---
 
-中文优先的 Obsidian vault 智能体插件——直连国产大模型 API（OpenAI 兼容协议 + Anthropic Messages 协议），智能体可自主**搜索、读取、创建、修改**你的笔记。无需安装任何 CLI，无需海外账号，无需配置环境变量。可配置**多个 Agent**（各自的服务商、Key、提示词），在标题栏一键切换。
+中文优先的 Obsidian vault 智能体插件（插件市场名 **AI Vault Agent CN**）——直连国产大模型 API（OpenAI 兼容协议 + Anthropic Messages 协议），智能体可自主**搜索、读取、创建、修改**你的笔记。无需安装任何 CLI，无需海外账号，无需配置环境变量。可配置**多个 Agent**（各自的服务商、Key、提示词），在标题栏一键切换。
 
-**当前版本：v0.2.1**
+**当前版本：v0.3.0**
 
 ## 为什么做这个
 
@@ -18,6 +18,7 @@
 
 | 你想用 | 选这个预设 |
 |---|---|
+| 本机 Magpie 网关（一个入口用上所有订阅/Key/路由组） | `Magpie 本地网关 (本机)`，或用 **🪄 用 Magpie 模板一键新建** |
 | DeepSeek 深度求索 | `DeepSeek` |
 | 智谱 GLM / Z.ai | `智谱 GLM` / `Z.ai` |
 | Kimi（月之暗面） | `Kimi` |
@@ -43,10 +44,12 @@
 - **会话保留与检索**：最近对话自动保存，重启后继续；侧栏「历史记录」按钮可搜索过往会话并载回继续对话，完整记录另存为 `history.jsonl`（见下）。
 - **多 Agent 与快速切换**：每个 Agent 保存自己的服务商、Base URL、API Key、模型、生成参数、系统提示词与联网配置；标题栏的切换按钮（或命令「切换智能体」）可即时换用另一个 Agent，对话上下文保持不变。
 - **Anthropic Messages 协议**：除 OpenAI 兼容协议外，支持 Anthropic Messages（`POST /v1/messages`），可直接接入火山方舟 Coding Plan 等 Anthropic 兼容端点。
+- **Magpie 本地网关（一键模板）**：设置里点一下就用 Magpie 网关建好 Agent，模型列表从网关 `/v1/models` 实时读取，不用手抄模型名。
+- **消息可复制**：每条用户消息与回答右上角都有复制按钮（悬停出现），点击即复制该条消息的纯文本/Markdown，图标短暂变成 ✓。
 
 ## 多 Agent 与火山方舟 Coding Plan
 
-设置 → Vault Agent → **智能体 (Agents)** 区域可管理多个 Agent：
+设置 → AI Vault Agent CN → **智能体 (Agents)** 区域可管理多个 Agent：
 
 - **＋ 新建空白 Agent**：从默认值开始，自行选择服务商并填 Key。
 - **⚡ 用火山 Coding Plan 模板新建**：预填 Anthropic 协议、Base URL `https://ark.cn-beijing.volces.com/api/coding` 与模型 `doubao-seed-code-preview-latest`，只需粘贴套餐专属 API Key。
@@ -63,21 +66,46 @@
 
 切换 Agent 时**对话上下文保留**，下一条消息即由新 Agent 应答；侧栏历史记录里每个会话会标注产生它的 Agent。
 
+## Magpie 本地网关（一键模板）
+
+[Magpie](https://usemagpie.ai) 是本机的一个 AI 网关（默认 `127.0.0.1:3425`），把你在里面配好的订阅、各家 API Key 和路由组统一成一套 `provider/model` 模型列表，并同时听懂 OpenAI Chat、Anthropic Messages 等协议。对本插件来说，它等于**一个服务商**，而不是每家用一套配置。
+
+设置 → AI Vault Agent CN → 智能体 (Agents) → **🪄 用 Magpie 模板一键新建**：
+
+1. 建好一个 Agent，Base URL 填 `http://127.0.0.1:3425/v1`，API Key 填 `magpie-ai-vault-agent`。
+2. 插件随即向网关 `GET /v1/models` 拉取你已启用的模型，自动选中一个（优先 `auto/…` 自动路由，其次 `group/…` 路由组，再次列表第一个）。
+3. 「模型 ID」下方会列出这些模型，点一下即可切换；换过 Magpie 里的配置后点「重新读取」。
+
+几个要知道的边界：
+
+- **网关没启动就发不出请求**（`net::ERR_CONNECTION_REFUSED`）。Magpie 关掉时，切回别的 Agent 即可。
+- **Key 不是密钥**。本机网关接受任意 Key，`magpie-ai-vault-agent` 只是让 Magpie 的用量统计和路由规则把你这个客户端记成 `ai-vault-agent`。切到别的服务商时插件会自动清掉它，避免被当成真 Key 误用。
+- **端口可改**。Magpie 的 `settings.json` 里改了 `port`，把 Base URL 一起改掉即可；也支持 Magpie 的「共享到局域网」地址。
+- 模型名就是 Magpie 的 `provider/model`（或路由组名），以 `/v1/models` 返回为准，本插件不内置任何固定列表。
+
+## 安装
+
+**社区插件市场**：设置 → 第三方插件 → 浏览 → 搜索 **AI Vault Agent CN** → 安装并启用。
+
+**手动安装**：把 `main.js`、`manifest.json`、`styles.css` 放进 `<vault>/.obsidian/plugins/vault-agent/`，重开 Obsidian 后在第三方插件里启用。
+
+**系统要求**：Obsidian 1.7.2 及以上；桌面端与移动端均可（本地代理仅桌面端）。
+
 ## 使用
 
-1. 设置 → Vault Agent → 在「智能体 (Agents)」里新建或选择一个 Agent → 选择服务商 → 粘贴 API Key → 选择模型。
-2. 点击左侧 ribbon 图标（或命令面板 "Open Vault Agent"）打开侧栏对话。
+1. 设置 → AI Vault Agent CN → 在「智能体 (Agents)」里新建或选择一个 Agent → 选择服务商 → 粘贴 API Key → 选择模型。
+2. 点击左侧 ribbon 图标（或命令面板「打开智能体 / open agent」）打开侧栏对话。
 3. 例如：「找出最近关于 X 的笔记整理成一篇 MOC」「把当前笔记的结尾改成总结段落」。
 4. 点击标题栏的**切换智能体**图标换用另一个 Agent（对话不变）；点击**历史记录**图标搜索过往会话，点任意一条即载回对话并继续。
 
 ## 本地代理
 
-设置 → Vault Agent → **本地代理（可选）** 填 `host:port`（如 `http://127.0.0.1:9000`；需认证时写 `user:pass@host:port`），
+设置 → AI Vault Agent CN → **本地代理（可选）** 填 `host:port`（如 `http://127.0.0.1:9000`；需认证时写 `user:pass@host:port`），
 AI 请求即经该代理转发，便于抓包排查或在受限网络下中转；留空直连。仅桌面端生效，不支持 SOCKS。
 
 ## 联网搜索
 
-模型训练数据有截止日期，库内笔记也未必覆盖最新信息。设置 → Vault Agent → **联网搜索** 有四档：
+模型训练数据有截止日期，库内笔记也未必覆盖最新信息。设置 → AI Vault Agent CN → **联网搜索** 有四档：
 
 | 模式 | 行为 |
 |---|---|
@@ -126,6 +154,13 @@ npm install
 npm run build   # tsc 检查 + esbuild 产出 main.js
 npm test        # node 端到端单测（mock SSE 服务 + 工具循环 + 历史记录器）
 ```
+
+## 问题反馈
+
+- GitHub Issues：<https://github.com/yanqingwang/opensource-AI-vault-agent/issues>
+- 邮箱：289631530@qq.com
+
+反馈时请尽量附上：Obsidian 版本、插件版本、问题描述或截图、预期结果。
 
 ## 许可证
 

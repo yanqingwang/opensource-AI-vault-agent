@@ -28,6 +28,7 @@ __export(main_exports, {
   applyProviderPreset: () => applyProviderPreset,
   default: () => VaultAgentPlugin,
   makeProfile: () => makeProfile,
+  migrateStarterAgent: () => migrateStarterAgent,
   reconcileProviderIds: () => reconcileProviderIds
 });
 module.exports = __toCommonJS(main_exports);
@@ -1054,7 +1055,7 @@ var zh = {
   copyMessage: "\u590D\u5236\u8FD9\u6761\u6D88\u606F",
   copied: "\u5DF2\u590D\u5236",
   copyFailed: "\u590D\u5236\u5931\u8D25",
-  defaultAgentName: "\u9ED8\u8BA4 Agent",
+  defaultAgentName: "deepseek",
   codingAgentName: "\u706B\u5C71 Coding Plan",
   newAgentName: "\u65B0 Agent",
   duplicateAgent: "\u590D\u5236",
@@ -1068,6 +1069,9 @@ var zh = {
   cancel: "\u53D6\u6D88",
   delete: "\u5220\u9664",
   agentActiveBadge: "\u5F53\u524D",
+  agentDefaultBadge: "\u9ED8\u8BA4",
+  setDefaultAgent: "\u8BBE\u4E3A\u9ED8\u8BA4",
+  agentIsDefault: "\u65B0\u5BF9\u8BDD\u9ED8\u8BA4\u4F7F\u7528\u8FD9\u4E2A Agent",
   deleteLastAgent: "\u81F3\u5C11\u9700\u8981\u4FDD\u7559\u4E00\u4E2A Agent\u3002",
   switchedAgent: "\u5DF2\u5207\u6362\u5230\uFF1A",
   agentCreated: "\u5DF2\u65B0\u5EFA Agent\uFF0C\u8BB0\u5F97\u586B\u540D\u79F0\u548C API Key\u3002",
@@ -1168,7 +1172,7 @@ var en = {
   copyMessage: "Copy this message",
   copied: "Copied",
   copyFailed: "Copy failed",
-  defaultAgentName: "Default agent",
+  defaultAgentName: "deepseek",
   codingAgentName: "Volcengine Coding Plan",
   newAgentName: "New agent",
   duplicateAgent: "Duplicate",
@@ -1182,6 +1186,9 @@ var en = {
   cancel: "Cancel",
   delete: "Delete",
   agentActiveBadge: "active",
+  agentDefaultBadge: "default",
+  setDefaultAgent: "Set as default",
+  agentIsDefault: "New conversations start with this agent",
   deleteLastAgent: "At least one agent must remain.",
   switchedAgent: "Switched to: ",
   agentCreated: "New agent created \u2014 set a name and API key.",
@@ -2477,6 +2484,17 @@ function applyProviderPreset(profile, providerId) {
   else if (profile.apiKey === MAGPIE_KEY)
     profile.apiKey = "";
 }
+function migrateStarterAgent(profiles, lang) {
+  let changed = false;
+  for (const profile of profiles) {
+    if (profile.name !== "\u9ED8\u8BA4 Agent" && profile.name !== "Default agent")
+      continue;
+    const { id } = profile;
+    Object.assign(profile, PROFILE_DEFAULTS, { id, name: t(lang, "defaultAgentName") });
+    changed = true;
+  }
+  return changed;
+}
 function reconcileProviderIds(profiles) {
   const norm = (url) => (url || "").trim().replace(/\/+$/, "");
   let changed = false;
@@ -2493,8 +2511,16 @@ function reconcileProviderIds(profiles) {
   return changed;
 }
 function defaultSettings() {
-  const profile = makeProfile("\u9ED8\u8BA4 Agent");
-  return { lang: "zh", profiles: [profile], activeProfileId: profile.id, history: [], sessionId: "", memoryNotes: true };
+  const profile = makeProfile("deepseek");
+  return {
+    lang: "zh",
+    profiles: [profile],
+    activeProfileId: profile.id,
+    defaultProfileId: profile.id,
+    history: [],
+    sessionId: "",
+    memoryNotes: true
+  };
 }
 var VaultAgentPlugin = class extends import_obsidian4.Plugin {
   constructor() {
@@ -2506,6 +2532,11 @@ var VaultAgentPlugin = class extends import_obsidian4.Plugin {
     this.loaded = false;
     /** The memory-note failure notice is shown once per session, not per turn. */
     this.memoryWarned = false;
+  }
+  /** The agent a fresh conversation starts on (falls back to the active one). */
+  get defaultProfile() {
+    const s = this.settings;
+    return s.profiles.find((p) => p.id === s.defaultProfileId) ?? this.profile;
   }
   /** The agent profile currently in use. */
   get profile() {
@@ -2675,6 +2706,8 @@ var VaultAgentPlugin = class extends import_obsidian4.Plugin {
     s.profiles.splice(idx, 1);
     if (s.activeProfileId === id)
       s.activeProfileId = s.profiles[0].id;
+    if (s.defaultProfileId === id)
+      s.defaultProfileId = s.profiles[0].id;
     void this.saveSettings();
     return true;
   }
@@ -2696,12 +2729,26 @@ var VaultAgentPlugin = class extends import_obsidian4.Plugin {
     this.notifySettingsChanged();
     return true;
   }
+  /**
+   * Make `id` the agent a fresh conversation starts on. The active agent is left
+   * alone: the current conversation keeps going where it is.
+   */
+  setDefaultProfile(id) {
+    const s = this.settings;
+    if (!s.profiles.some((p) => p.id === id) || s.defaultProfileId === id)
+      return false;
+    s.defaultProfileId = id;
+    void this.saveSettings();
+    this.notifySettingsChanged();
+    return true;
+  }
   /** Menu of configured agents, anchored to the click or to the view's switcher button. */
   openAgentSwitcher(evt) {
     const s = this.settings;
     const menu = new import_obsidian4.Menu();
     for (const p of s.profiles) {
-      menu.addItem((item) => item.setTitle(p.name + (p.model ? " \xB7 " + p.model : "")).setChecked(p.id === s.activeProfileId).onClick(() => this.switchProfile(p.id)));
+      const isDefault = p.id === s.defaultProfileId;
+      menu.addItem((item) => item.setTitle(p.name + (p.model ? " \xB7 " + p.model : "") + (isDefault ? " \xB7 " + t(s.lang, "agentDefaultBadge") : "")).setChecked(p.id === s.activeProfileId).onClick(() => this.switchProfile(p.id)));
     }
     menu.addSeparator();
     menu.addItem((item) => item.setTitle(t(s.lang, "openSettings")).setIcon("settings").onClick(() => this.openSettings()));
@@ -2742,10 +2789,14 @@ var VaultAgentPlugin = class extends import_obsidian4.Plugin {
         const active = profiles.some((p) => p.id === data.activeProfileId) ? data.activeProfileId : profiles[0].id;
         if (reconcileProviderIds(profiles))
           migrated = true;
+        if (migrateStarterAgent(profiles, data.lang ?? "zh"))
+          migrated = true;
+        const defaultId = profiles.some((p) => p.id === data.defaultProfileId) ? data.defaultProfileId : active;
         this.settings = {
           lang: data.lang ?? "zh",
           profiles,
           activeProfileId: active,
+          defaultProfileId: defaultId,
           history: Array.isArray(data.history) ? data.history : [],
           sessionId: data.sessionId ?? "",
           memoryNotes: data.memoryNotes ?? true
@@ -2776,6 +2827,7 @@ var VaultAgentPlugin = class extends import_obsidian4.Plugin {
           lang,
           profiles: [profile],
           activeProfileId: profile.id,
+          defaultProfileId: profile.id,
           history: Array.isArray(data.history) ? data.history : [],
           sessionId: data.sessionId ?? "",
           memoryNotes: data.memoryNotes ?? true
@@ -3008,6 +3060,7 @@ var VASettingTab = class extends import_obsidian4.PluginSettingTab {
     el.empty();
     for (const p of s.profiles) {
       const active = p.id === s.activeProfileId;
+      const isDefault = p.id === s.defaultProfileId;
       const row = el.createDiv({ cls: "va-agent-row" + (active ? " va-agent-row-active" : "") });
       const nameInput = row.createEl("input", { cls: "va-agent-name", attr: { type: "text", "aria-label": this.st("agentName") } });
       nameInput.value = p.name;
@@ -3018,9 +3071,25 @@ var VASettingTab = class extends import_obsidian4.PluginSettingTab {
         void this.plugin.saveSettings().then(() => this.refreshTab());
       });
       row.createSpan({ cls: "va-agent-tag", text: p.protocol === "anthropic" ? "Anthropic" : "OpenAI" });
+      if (isDefault) {
+        row.createSpan({
+          cls: "va-agent-badge va-agent-default",
+          text: this.st("agentDefaultBadge"),
+          attr: { title: this.st("agentIsDefault") }
+        });
+      }
       if (active)
         row.createSpan({ cls: "va-agent-badge", text: this.st("agentActiveBadge") });
       const actions = row.createDiv({ cls: "va-agent-actions" });
+      if (!isDefault) {
+        const star = actions.createEl("button", { cls: "va-icon-btn", attr: { "aria-label": this.st("setDefaultAgent"), title: this.st("setDefaultAgent") } });
+        (0, import_obsidian4.setIcon)(star, "star");
+        star.addEventListener("click", (e) => {
+          e.stopPropagation();
+          this.plugin.setDefaultProfile(p.id);
+          this.refreshTab();
+        });
+      }
       const dup = actions.createEl("button", { cls: "va-icon-btn", attr: { "aria-label": this.st("duplicateAgent"), title: this.st("duplicateAgent") } });
       (0, import_obsidian4.setIcon)(dup, "copy");
       dup.addEventListener("click", (e) => {

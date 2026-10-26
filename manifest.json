@@ -1,7 +1,7 @@
 {
 	"id": "vault-agent",
 	"name": "AI Vault Agent CN",
-	"version": "0.3.3",
+	"version": "0.3.4",
 	"minAppVersion": "1.7.2",
 	"description": "AI vault agent for China-accessible LLMs (DeepSeek, GLM, Kimi, Qwen, Volcengine Ark) or any OpenAI-/Anthropic-compatible API, with a one-click Magpie gateway template. Multiple switchable agents; agentic note search, read, create, edit. No CLI.",
 	"author": "rosswang",

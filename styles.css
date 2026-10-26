@@ -440,6 +440,13 @@
   border-radius: var(--radius-s);
   padding: 0 6px;
 }
+/* The default agent is a quieter claim than the active one: it decides where the
+   next conversation starts, not what this turn is using. */
+.va-agent-default {
+  color: var(--text-muted);
+  background: none;
+  border: 1px solid var(--background-modifier-border);
+}
 .va-agent-actions { display: flex; gap: 2px; flex: 0 0 auto; }
 .va-agent-buttons { display: flex; gap: 8px; margin-top: 4px; }
 .va-confirm-buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 1em; }

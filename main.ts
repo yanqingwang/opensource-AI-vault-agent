@@ -95,6 +95,11 @@ export interface VASettings {
 	lang: Lang;
 	profiles: AgentProfile[];
 	activeProfileId: string;
+	/**
+	 * The agent a fresh conversation starts on. Separate from `activeProfileId`
+	 * so switching agents mid-conversation does not change what "default" means.
+	 */
+	defaultProfileId: string;
 	/** Conversation is shared by all agents (switching keeps the context). */
 	history: ChatMessage[];
 	/** Id of the conversation currently being appended to history.jsonl. */
@@ -176,6 +181,27 @@ export function applyProviderPreset(profile: AgentProfile, providerId: string): 
  * preset's address. A hand-written custom endpoint never matches, so user
  * configuration is not rewritten.
  */
+/**
+ * Older builds shipped a starter agent called "默认 Agent" carrying whatever
+ * provider was configured at the time. That placeholder is gone: a starter agent
+ * is called `deepseek`, holds the DeepSeek defaults, and has no key — a fresh
+ * agent should be something you paste a key into, not someone else's leftover
+ * credentials.
+ *
+ * Only that exact placeholder name is migrated, so a name the user typed (and
+ * whatever key it holds) is never touched.
+ */
+export function migrateStarterAgent(profiles: AgentProfile[], lang: Lang): boolean {
+	let changed = false;
+	for (const profile of profiles) {
+		if (profile.name !== '默认 Agent' && profile.name !== 'Default agent') continue;
+		const { id } = profile;
+		Object.assign(profile, PROFILE_DEFAULTS, { id, name: t(lang, 'defaultAgentName') });
+		changed = true;
+	}
+	return changed;
+}
+
 export function reconcileProviderIds(profiles: AgentProfile[]): boolean {
 	const norm = (url: string) => (url || '').trim().replace(/\/+$/, '');
 	let changed = false;
@@ -191,8 +217,16 @@ export function reconcileProviderIds(profiles: AgentProfile[]): boolean {
 }
 
 function defaultSettings(): VASettings {
-	const profile = makeProfile('默认 Agent');
-	return { lang: 'zh', profiles: [profile], activeProfileId: profile.id, history: [], sessionId: '', memoryNotes: true };
+	const profile = makeProfile('deepseek');
+	return {
+		lang: 'zh',
+		profiles: [profile],
+		activeProfileId: profile.id,
+		defaultProfileId: profile.id,
+		history: [],
+		sessionId: '',
+		memoryNotes: true
+	};
 }
 
 export default class VaultAgentPlugin extends Plugin {
@@ -203,6 +237,12 @@ export default class VaultAgentPlugin extends Plugin {
 	private loaded = false;
 	/** The memory-note failure notice is shown once per session, not per turn. */
 	private memoryWarned = false;
+
+	/** The agent a fresh conversation starts on (falls back to the active one). */
+	get defaultProfile(): AgentProfile {
+		const s = this.settings;
+		return s.profiles.find(p => p.id === s.defaultProfileId) ?? this.profile;
+	}
 
 	/** The agent profile currently in use. */
 	get profile(): AgentProfile {
@@ -380,6 +420,7 @@ export default class VaultAgentPlugin extends Plugin {
 		if (idx < 0) return false;
 		s.profiles.splice(idx, 1);
 		if (s.activeProfileId === id) s.activeProfileId = s.profiles[0].id;
+		if (s.defaultProfileId === id) s.defaultProfileId = s.profiles[0].id;
 		void this.saveSettings();
 		return true;
 	}
@@ -401,13 +442,27 @@ export default class VaultAgentPlugin extends Plugin {
 		return true;
 	}
 
+	/**
+	 * Make `id` the agent a fresh conversation starts on. The active agent is left
+	 * alone: the current conversation keeps going where it is.
+	 */
+	setDefaultProfile(id: string): boolean {
+		const s = this.settings;
+		if (!s.profiles.some(p => p.id === id) || s.defaultProfileId === id) return false;
+		s.defaultProfileId = id;
+		void this.saveSettings();
+		this.notifySettingsChanged();
+		return true;
+	}
+
 	/** Menu of configured agents, anchored to the click or to the view's switcher button. */
 	openAgentSwitcher(evt?: MouseEvent): void {
 		const s = this.settings;
 		const menu = new Menu();
 		for (const p of s.profiles) {
+			const isDefault = p.id === s.defaultProfileId;
 			menu.addItem(item => item
-				.setTitle(p.name + (p.model ? ' · ' + p.model : ''))
+				.setTitle(p.name + (p.model ? ' · ' + p.model : '') + (isDefault ? ' · ' + t(s.lang, 'agentDefaultBadge') : ''))
 				.setChecked(p.id === s.activeProfileId)
 				.onClick(() => this.switchProfile(p.id)));
 		}
@@ -458,10 +513,13 @@ export default class VaultAgentPlugin extends Plugin {
 				const profiles = data.profiles.map(p => ({ ...PROFILE_DEFAULTS, ...p })) as AgentProfile[];
 				const active = profiles.some(p => p.id === data.activeProfileId) ? (data.activeProfileId as string) : profiles[0].id;
 				if (reconcileProviderIds(profiles)) migrated = true;
+				if (migrateStarterAgent(profiles, data.lang ?? 'zh')) migrated = true;
+				const defaultId = profiles.some(p => p.id === data.defaultProfileId) ? (data.defaultProfileId as string) : active;
 				this.settings = {
 					lang: data.lang ?? 'zh',
 					profiles,
 					activeProfileId: active,
+					defaultProfileId: defaultId,
 					history: Array.isArray(data.history) ? data.history : [],
 					sessionId: data.sessionId ?? '',
 					memoryNotes: data.memoryNotes ?? true
@@ -494,6 +552,7 @@ export default class VaultAgentPlugin extends Plugin {
 					lang,
 					profiles: [profile],
 					activeProfileId: profile.id,
+					defaultProfileId: profile.id,
 					history: Array.isArray(data.history) ? data.history : [],
 					sessionId: data.sessionId ?? '',
 					memoryNotes: data.memoryNotes ?? true
@@ -727,6 +786,7 @@ class VASettingTab extends PluginSettingTab {
 
 		for (const p of s.profiles) {
 			const active = p.id === s.activeProfileId;
+			const isDefault = p.id === s.defaultProfileId;
 			const row = el.createDiv({ cls: 'va-agent-row' + (active ? ' va-agent-row-active' : '') });
 
 			const nameInput = row.createEl('input', { cls: 'va-agent-name', attr: { type: 'text', 'aria-label': this.st('agentName') } });
@@ -739,9 +799,23 @@ class VASettingTab extends PluginSettingTab {
 			});
 
 			row.createSpan({ cls: 'va-agent-tag', text: p.protocol === 'anthropic' ? 'Anthropic' : 'OpenAI' });
+			if (isDefault) {
+				row.createSpan({
+					cls: 'va-agent-badge va-agent-default',
+					text: this.st('agentDefaultBadge'),
+					attr: { title: this.st('agentIsDefault') }
+				});
+			}
 			if (active) row.createSpan({ cls: 'va-agent-badge', text: this.st('agentActiveBadge') });
 
 			const actions = row.createDiv({ cls: 'va-agent-actions' });
+			// Star: make this the agent a fresh conversation starts on. Only shown
+			// when it would do something, so the row does not gain a dead button.
+			if (!isDefault) {
+				const star = actions.createEl('button', { cls: 'va-icon-btn', attr: { 'aria-label': this.st('setDefaultAgent'), title: this.st('setDefaultAgent') } });
+				setIcon(star, 'star');
+				star.addEventListener('click', e => { e.stopPropagation(); this.plugin.setDefaultProfile(p.id); this.refreshTab(); });
+			}
 			const dup = actions.createEl('button', { cls: 'va-icon-btn', attr: { 'aria-label': this.st('duplicateAgent'), title: this.st('duplicateAgent') } });
 			setIcon(dup, 'copy');
 			dup.addEventListener('click', e => { e.stopPropagation(); this.plugin.duplicateProfile(p.id); this.refreshTab(); });

@@ -2484,13 +2484,16 @@ function applyProviderPreset(profile, providerId) {
   else if (profile.apiKey === MAGPIE_KEY)
     profile.apiKey = "";
 }
-function migrateStarterAgent(profiles, lang) {
+function migrateStarterAgent(profiles) {
   let changed = false;
   for (const profile of profiles) {
     if (profile.name !== "\u9ED8\u8BA4 Agent" && profile.name !== "Default agent")
       continue;
+    const pristine = profile.providerId === PROFILE_DEFAULTS.providerId && profile.baseUrl === PROFILE_DEFAULTS.baseUrl && profile.model === PROFILE_DEFAULTS.model && !profile.apiKey.trim();
+    if (!pristine)
+      continue;
     const { id } = profile;
-    Object.assign(profile, PROFILE_DEFAULTS, { id, name: t(lang, "defaultAgentName") });
+    Object.assign(profile, PROFILE_DEFAULTS, { id, name: "deepseek" });
     changed = true;
   }
   return changed;
@@ -2789,7 +2792,7 @@ var VaultAgentPlugin = class extends import_obsidian4.Plugin {
         const active = profiles.some((p) => p.id === data.activeProfileId) ? data.activeProfileId : profiles[0].id;
         if (reconcileProviderIds(profiles))
           migrated = true;
-        if (migrateStarterAgent(profiles, data.lang ?? "zh"))
+        if (migrateStarterAgent(profiles))
           migrated = true;
         const defaultId = profiles.some((p) => p.id === data.defaultProfileId) ? data.defaultProfileId : active;
         this.settings = {

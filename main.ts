@@ -182,21 +182,28 @@ export function applyProviderPreset(profile: AgentProfile, providerId: string): 
  * configuration is not rewritten.
  */
 /**
- * Older builds shipped a starter agent called "默认 Agent" carrying whatever
- * provider was configured at the time. That placeholder is gone: a starter agent
- * is called `deepseek`, holds the DeepSeek defaults, and has no key — a fresh
- * agent should be something you paste a key into, not someone else's leftover
- * credentials.
+ * Older builds shipped a starter agent called "默认 Agent". A starter agent is
+ * now called `deepseek`, holds the DeepSeek defaults and has no key: it should be
+ * something you paste a key into, not leftover credentials.
  *
- * Only that exact placeholder name is migrated, so a name the user typed (and
- * whatever key it holds) is never touched.
+ * Only a placeholder that is still *pristine* is reset — the default provider,
+ * the default base URL and an empty key. A "默认 Agent" the user actually
+ * configured (a real key, a Magpie gateway, another vendor) is left completely
+ * alone: renaming it `deepseek` would be a lie, and resetting it would throw away
+ * working credentials.
  */
-export function migrateStarterAgent(profiles: AgentProfile[], lang: Lang): boolean {
+export function migrateStarterAgent(profiles: AgentProfile[]): boolean {
 	let changed = false;
 	for (const profile of profiles) {
 		if (profile.name !== '默认 Agent' && profile.name !== 'Default agent') continue;
+		const pristine =
+			profile.providerId === PROFILE_DEFAULTS.providerId &&
+			profile.baseUrl === PROFILE_DEFAULTS.baseUrl &&
+			profile.model === PROFILE_DEFAULTS.model &&
+			!profile.apiKey.trim();
+		if (!pristine) continue;
 		const { id } = profile;
-		Object.assign(profile, PROFILE_DEFAULTS, { id, name: t(lang, 'defaultAgentName') });
+		Object.assign(profile, PROFILE_DEFAULTS, { id, name: 'deepseek' });
 		changed = true;
 	}
 	return changed;
@@ -513,7 +520,7 @@ export default class VaultAgentPlugin extends Plugin {
 				const profiles = data.profiles.map(p => ({ ...PROFILE_DEFAULTS, ...p })) as AgentProfile[];
 				const active = profiles.some(p => p.id === data.activeProfileId) ? (data.activeProfileId as string) : profiles[0].id;
 				if (reconcileProviderIds(profiles)) migrated = true;
-				if (migrateStarterAgent(profiles, data.lang ?? 'zh')) migrated = true;
+				if (migrateStarterAgent(profiles)) migrated = true;
 				const defaultId = profiles.some(p => p.id === data.defaultProfileId) ? (data.defaultProfileId as string) : active;
 				this.settings = {
 					lang: data.lang ?? 'zh',

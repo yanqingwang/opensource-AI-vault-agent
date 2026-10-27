@@ -4,7 +4,7 @@ import { runAnthropicLoop } from './anthropic';
 import { FetchLike, makeProxyFetch } from './proxyFetch';
 import { parseHistory, sessionCursor, sessionTranscript, summarizeSessions, type HistoryEvent } from './history';
 import { buildWebSearchToolDef, createWebSearchExecutor, resolveSearch, withTimeout, WEB_SEARCH_TOOL_NAME, type SearchPost, type SearchSettings } from './search';
-import { t } from './i18n';
+import { t, tf } from './i18n';
 import { addCopyButton } from './clipboard';
 import { VaultToolExecutor, buildToolDefs } from './tools';
 import type VaultAgentPlugin from './main';
@@ -122,6 +122,11 @@ export class AgentView extends ItemView {
 		const ta = this.inputAreaEl.createEl('textarea', { cls: 'va-input', attr: { placeholder: this.st('inputPlaceholder'), rows: '3' } });
 		this.inputEl = ta;
 		const btnRow = this.inputAreaEl.createDiv({ cls: 'va-send-row' });
+		this.runStatusEl = btnRow.createDiv({ cls: 'va-run-status', attr: { role: 'status', 'aria-live': 'polite' } });
+		const statusIcon = this.runStatusEl.createSpan({ cls: 'va-run-status-icon' });
+		setIcon(statusIcon, 'loader-2');
+		statusIcon.addClass('va-spinner');
+		this.runStatusTextEl = this.runStatusEl.createSpan({ cls: 'va-run-status-text' });
 		this.stopBtn = btnRow.createEl('button', { cls: 'va-stop-btn', text: '⏹ ' + this.st('stop') });
 		this.stopBtn.disabled = true;
 		this.stopBtn.addEventListener('click', () => this.abort?.abort());
@@ -135,6 +140,17 @@ export class AgentView extends ItemView {
 		});
 	}
 
+	/**
+	 * Phase label shown while a turn is running. It lives in the composer, not in
+	 * the transcript, so it stays visible even when the reader has scrolled up.
+	 * `null` hides the row again.
+	 */
+	private setRunStatus(text: string | null): void {
+		if (!this.runStatusEl || !this.runStatusTextEl) return;
+		if (text && this.runStatusTextEl.textContent !== text) this.runStatusTextEl.setText(text);
+		this.runStatusEl.toggleClass('is-visible', !!text);
+	}
+
 	private msgsEl!: HTMLElement;
 	private brandEl: HTMLElement | null = null;
 	private modelEl: HTMLElement | null = null;
@@ -144,6 +160,9 @@ export class AgentView extends ItemView {
 	private inputEl!: HTMLTextAreaElement;
 	private stopBtn!: HTMLButtonElement;
 	private sendBtn!: HTMLButtonElement;
+	/** Live phase label beside the stop button; visible only while a turn runs. */
+	private runStatusEl: HTMLElement | null = null;
+	private runStatusTextEl: HTMLElement | null = null;
 	/** Raw history.jsonl, cached while the history panel is open. */
 	private historyText = '';
 	private historyQuery = '';
@@ -465,13 +484,18 @@ export class AgentView extends ItemView {
 	private confirmWrite(summary: string): Promise<boolean> {
 		const s = this.plugin.profile;
 		if (s.autoApprove) return Promise.resolve(true);
+		this.setRunStatus(this.st('confirmWaiting'));
 		return new Promise(resolve => {
 			const bar = this.msgsEl.createDiv({ cls: 'va-confirm' });
 			bar.createSpan({ text: this.st('confirmTitle') + ' — ' + summary });
 			const row = bar.createDiv({ cls: 'va-confirm-row' });
 			const yes = row.createEl('button', { cls: 'mod-cta', text: this.st('confirmAllow') });
 			const no = row.createEl('button', { text: this.st('confirmDeny') });
-			const done = (v: boolean) => { bar.remove(); resolve(v); };
+			const done = (v: boolean) => {
+				bar.remove();
+				this.setRunStatus(this.st('waitingModel'));
+				resolve(v);
+			};
 			yes.addEventListener('click', () => done(true));
 			no.addEventListener('click', () => done(false));
 			// This blocks the turn until answered, so it has to be visible.
@@ -494,6 +518,7 @@ export class AgentView extends ItemView {
 		this.abort = new AbortController();
 		this.stopBtn.disabled = false;
 		this.sendBtn.disabled = true;
+		this.setRunStatus(this.st('waitingModel'));
 
 		this.renderUserBubble(input);
 		// Sending is an explicit jump to the bottom, even if the reader had scrolled up.
@@ -537,6 +562,13 @@ export class AgentView extends ItemView {
 		// Tool calls execute sequentially: chips complete in FIFO order.
 		const chipQueue: HTMLElement[] = [];
 		const toolStartedAt = new Map<string, number>();
+		// The label only changes between phases, so repeated deltas do not touch the DOM.
+		let phase = this.st('waitingModel');
+		const setPhase = (next: string) => {
+			if (next === phase) return;
+			phase = next;
+			this.setRunStatus(next);
+		};
 
 		try {
 			// Provider-agnostic turn options; the protocol decides which loop runs.
@@ -554,9 +586,16 @@ export class AgentView extends ItemView {
 				confirmWrite: (summary: string) => this.confirmWrite(summary),
 				fetchImpl,
 				fallbackPost: post,
-				onText: (d: string) => stream.push(d),
-				onReasoning: (d: string) => stream.pushReasoning(d),
+				onText: (d: string) => {
+					setPhase(this.st('streaming'));
+					stream.push(d);
+				},
+				onReasoning: (d: string) => {
+					setPhase(this.st('thinking'));
+					stream.pushReasoning(d);
+				},
 				onToolStart: (call: ToolCall) => {
+					setPhase(tf(this.plugin.lang, 'runningTool', { name: call.function.name }));
 					toolStartedAt.set(call.id, Date.now());
 					history.toolCall(call);
 					chipQueue.push(this.addToolChip(call));
@@ -565,6 +604,7 @@ export class AgentView extends ItemView {
 					history.toolResult(call, result, Date.now() - (toolStartedAt.get(call.id) ?? Date.now()));
 					const chip = chipQueue.shift();
 					if (chip) this.completeToolChip(chip, result);
+					setPhase(this.st('waitingModel'));
 				}
 			};
 			// Coding Plan (and any Anthropic-compatible endpoint) speaks /v1/messages;
@@ -602,6 +642,7 @@ export class AgentView extends ItemView {
 			this.running = false;
 			this.stopBtn.disabled = true;
 			this.sendBtn.disabled = false;
+			this.setRunStatus(null);
 			void this.plugin.saveHistory(this.messages);
 			// The turn is over, so history.jsonl is complete for it: refresh the
 			// vault note now, not only when the view closes.

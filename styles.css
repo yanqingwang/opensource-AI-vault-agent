@@ -12,15 +12,24 @@
   -webkit-user-select: text;
 }
 
-/* `.workspace-leaf-content .view-content` (0,2,0) also matches this element and
-   out-specifies a bare `.va-root`, so the panel inherited Obsidian's
-   `padding: 12px 12px 32px` and `overflow: auto` -- a second scroll container
-   wrapped around `.va-messages`. Reclaim the box so the message list is the only
-   thing that scrolls. */
+/* Core's `.workspace-leaf-content .view-content` (0,2,0) adds side padding and
+   the bottom inset that keeps content clear of Obsidian's fixed status bar, plus
+   `overflow: auto`; `.workspace-split.mod-*` (0,3,0) forces `height: 100%`.
+   Those out-specify a bare `.va-root`, so reclaim the box with a scoped,
+   higher-specificity selector: keep the bottom inset, drop the side padding, and
+   size it as a flex item instead of 100% (the leaf-content column already
+   reserves room for the view header). */
 .view-content.va-root,
-.workspace-leaf-content[data-type="vault-agent-view"] .view-content.va-root {
-  padding: 0;
+.workspace-leaf-content[data-type="vault-agent-view"] > .view-content.va-root {
+  /* Obsidian's status bar is `position: fixed` over the bottom of the pane and
+     core compensates with 32px bottom padding. Removing that padding put the
+     send row underneath the status bar — the button was there but invisible. */
+  padding: 0 0 max(var(--safe-area-inset-bottom, 0px), var(--size-4-8));
   overflow: hidden;
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 0;
+  box-sizing: border-box;
 }
 .va-header {
   display: flex;
@@ -277,7 +286,22 @@
   background: var(--background-secondary);
   color: var(--text-normal);
 }
-.va-send-row { display: flex; justify-content: flex-end; gap: 8px; }
+.va-send-row { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+/* Phase indicator for a running turn. It sits in the composer, so it stays
+   visible no matter where the transcript is scrolled. */
+.va-run-status {
+  display: none;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin-inline-end: auto;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  user-select: none;
+}
+.va-run-status.is-visible { display: flex; }
+.va-run-status .svg-icon { --icon-size: 14px; flex: 0 0 auto; }
+.va-run-status-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .va-send-btn, .va-stop-btn { cursor: pointer; }
 .va-stop-btn { color: var(--text-error); }
 .va-send-btn:disabled, .va-stop-btn:disabled {

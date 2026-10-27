@@ -1083,6 +1083,9 @@ var zh = {
   thinking: "\u601D\u8003\u4E2D\u2026",
   thought: "\u{1F4AD} \u601D\u8003\u8FC7\u7A0B",
   streaming: "\u751F\u6210\u4E2D\u2026",
+  waitingModel: "\u6B63\u5728\u7B49\u5F85\u6A21\u578B\u54CD\u5E94\u2026",
+  runningTool: "\u6B63\u5728\u6267\u884C {name}\u2026",
+  confirmWaiting: "\u7B49\u5F85\u4F60\u786E\u8BA4\u5199\u64CD\u4F5C\u2026",
   errPrefix: "\u8BF7\u6C42\u5931\u8D25",
   maxIterReached: "\u5DF2\u8FBE\u5355\u8F6E\u5DE5\u5177\u8C03\u7528\u4E0A\u9650\uFF0C\u8BF7\u7EE7\u7EED\u5BF9\u8BDD\u8BA9\u5B83\u63A5\u7740\u505A\u3002",
   settingsHeading: "AI Vault Agent CN",
@@ -1200,6 +1203,9 @@ var en = {
   thinking: "Thinking\u2026",
   thought: "\u{1F4AD} Thought process",
   streaming: "Generating\u2026",
+  waitingModel: "Waiting for the model\u2026",
+  runningTool: "Running {name}\u2026",
+  confirmWaiting: "Waiting for your approval\u2026",
   errPrefix: "Request failed",
   maxIterReached: "Tool-call limit for this turn reached \u2014 keep chatting to continue.",
   settingsHeading: "AI Vault Agent CN",
@@ -1612,6 +1618,9 @@ var AgentView = class extends import_obsidian3.ItemView {
     this.brandEl = null;
     this.modelEl = null;
     this.switchBtn = null;
+    /** Live phase label beside the stop button; visible only while a turn runs. */
+    this.runStatusEl = null;
+    this.runStatusTextEl = null;
     /** Raw history.jsonl, cached while the history panel is open. */
     this.historyText = "";
     this.historyQuery = "";
@@ -1720,6 +1729,11 @@ var AgentView = class extends import_obsidian3.ItemView {
     const ta = this.inputAreaEl.createEl("textarea", { cls: "va-input", attr: { placeholder: this.st("inputPlaceholder"), rows: "3" } });
     this.inputEl = ta;
     const btnRow = this.inputAreaEl.createDiv({ cls: "va-send-row" });
+    this.runStatusEl = btnRow.createDiv({ cls: "va-run-status", attr: { role: "status", "aria-live": "polite" } });
+    const statusIcon = this.runStatusEl.createSpan({ cls: "va-run-status-icon" });
+    (0, import_obsidian3.setIcon)(statusIcon, "loader-2");
+    statusIcon.addClass("va-spinner");
+    this.runStatusTextEl = this.runStatusEl.createSpan({ cls: "va-run-status-text" });
     this.stopBtn = btnRow.createEl("button", { cls: "va-stop-btn", text: "\u23F9 " + this.st("stop") });
     this.stopBtn.disabled = true;
     this.stopBtn.addEventListener("click", () => this.abort?.abort());
@@ -1731,6 +1745,18 @@ var AgentView = class extends import_obsidian3.ItemView {
         void this.send();
       }
     });
+  }
+  /**
+   * Phase label shown while a turn is running. It lives in the composer, not in
+   * the transcript, so it stays visible even when the reader has scrolled up.
+   * `null` hides the row again.
+   */
+  setRunStatus(text) {
+    if (!this.runStatusEl || !this.runStatusTextEl)
+      return;
+    if (text && this.runStatusTextEl.textContent !== text)
+      this.runStatusTextEl.setText(text);
+    this.runStatusEl.toggleClass("is-visible", !!text);
   }
   addWelcome() {
     const el = this.msgsEl.createDiv({ cls: "va-welcome" });
@@ -2023,6 +2049,7 @@ var AgentView = class extends import_obsidian3.ItemView {
     const s = this.plugin.profile;
     if (s.autoApprove)
       return Promise.resolve(true);
+    this.setRunStatus(this.st("confirmWaiting"));
     return new Promise((resolve) => {
       const bar = this.msgsEl.createDiv({ cls: "va-confirm" });
       bar.createSpan({ text: this.st("confirmTitle") + " \u2014 " + summary });
@@ -2031,6 +2058,7 @@ var AgentView = class extends import_obsidian3.ItemView {
       const no = row.createEl("button", { text: this.st("confirmDeny") });
       const done = (v) => {
         bar.remove();
+        this.setRunStatus(this.st("waitingModel"));
         resolve(v);
       };
       yes.addEventListener("click", () => done(true));
@@ -2055,6 +2083,7 @@ var AgentView = class extends import_obsidian3.ItemView {
     this.abort = new AbortController();
     this.stopBtn.disabled = false;
     this.sendBtn.disabled = true;
+    this.setRunStatus(this.st("waitingModel"));
     this.renderUserBubble(input);
     this.scrollBottom(true);
     this.messages.push({ role: "user", content: input });
@@ -2084,6 +2113,13 @@ var AgentView = class extends import_obsidian3.ItemView {
     };
     const chipQueue = [];
     const toolStartedAt = /* @__PURE__ */ new Map();
+    let phase = this.st("waitingModel");
+    const setPhase = (next) => {
+      if (next === phase)
+        return;
+      phase = next;
+      this.setRunStatus(next);
+    };
     try {
       const base = {
         baseUrl: s.baseUrl,
@@ -2099,9 +2135,16 @@ var AgentView = class extends import_obsidian3.ItemView {
         confirmWrite: (summary) => this.confirmWrite(summary),
         fetchImpl,
         fallbackPost: post,
-        onText: (d) => stream.push(d),
-        onReasoning: (d) => stream.pushReasoning(d),
+        onText: (d) => {
+          setPhase(this.st("streaming"));
+          stream.push(d);
+        },
+        onReasoning: (d) => {
+          setPhase(this.st("thinking"));
+          stream.pushReasoning(d);
+        },
         onToolStart: (call) => {
+          setPhase(tf(this.plugin.lang, "runningTool", { name: call.function.name }));
           toolStartedAt.set(call.id, Date.now());
           history.toolCall(call);
           chipQueue.push(this.addToolChip(call));
@@ -2111,6 +2154,7 @@ var AgentView = class extends import_obsidian3.ItemView {
           const chip = chipQueue.shift();
           if (chip)
             this.completeToolChip(chip, result);
+          setPhase(this.st("waitingModel"));
         }
       };
       const { text, reasoning, hitCap } = s.protocol === "anthropic" ? await runAnthropicLoop(base) : await runAgentLoop({
@@ -2137,6 +2181,7 @@ var AgentView = class extends import_obsidian3.ItemView {
       this.running = false;
       this.stopBtn.disabled = true;
       this.sendBtn.disabled = false;
+      this.setRunStatus(null);
       void this.plugin.saveHistory(this.messages);
       await this.plugin.history.flush();
       void this.plugin.saveMemoryNote();

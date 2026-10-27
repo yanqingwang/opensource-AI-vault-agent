@@ -1,6 +1,6 @@
 {
   "name": "opensource-ai-vault-agent",
-  "version": "0.3.6",
+  "version": "0.3.7",
   "description": "AI vault agent powered by China-accessible LLM APIs (DeepSeek / GLM / Kimi / Qwen / Volcengine Ark Coding Plan / any OpenAI- or Anthropic-compatible endpoint). Multiple switchable agents, agentic read/search/create/edit of notes — no CLI.",
   "main": "main.js",
   "scripts": {

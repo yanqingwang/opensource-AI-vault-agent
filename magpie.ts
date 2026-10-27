@@ -18,6 +18,8 @@ export interface MagpieModel {
 	displayName?: string;
 	ownedBy?: string;
 	contextWindow?: number;
+	/** The gateway's per-request output ceiling; absent when it does not report one. */
+	maxOutputTokens?: number;
 }
 
 /**
@@ -49,10 +51,27 @@ export function parseMagpieModels(body: unknown): MagpieModel[] {
 			id: m.id,
 			displayName: typeof m.display_name === 'string' ? m.display_name : undefined,
 			ownedBy: typeof m.owned_by === 'string' ? m.owned_by : undefined,
-			contextWindow: typeof m.context_window === 'number' ? m.context_window : undefined
+			contextWindow: typeof m.context_window === 'number' ? m.context_window : undefined,
+			maxOutputTokens: typeof m.max_output_tokens === 'number' && Number.isFinite(m.max_output_tokens) && m.max_output_tokens > 0
+				? m.max_output_tokens
+				: undefined
 		});
 	}
 	return out;
+}
+
+/**
+ * Output ceiling to send for a catalogue model. A `group/…` routes to any of
+ * several members, and its own entry may advertise more than a member accepts
+ * (a 128K group routed to a 64K model returned "MaxTokens invalid, should be in
+ * [1, 65536]"), so a group takes the smallest ceiling in the catalogue.
+ */
+export function modelOutputLimit(models: MagpieModel[], modelId: string): number | undefined {
+	if (modelId.startsWith('group/')) {
+		const caps = models.map(m => m.maxOutputTokens).filter((n): n is number => typeof n === 'number' && n > 0);
+		return caps.length ? Math.min(...caps) : undefined;
+	}
+	return models.find(m => m.id === modelId)?.maxOutputTokens;
 }
 
 /**

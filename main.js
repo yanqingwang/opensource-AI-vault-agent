@@ -1101,6 +1101,11 @@ var zh = {
   modelPreset: "\u5E38\u7528\u6A21\u578B\uFF08\u70B9\u9009\u586B\u5165\uFF09",
   temperature: "Temperature",
   maxTokens: "\u5355\u6B21\u56DE\u590D\u6700\u5927 Tokens",
+  maxTokensDesc: "\u5355\u6B21\u56DE\u590D\u5141\u8BB8\u751F\u6210\u7684\u6700\u5927 token \u6570\u3002",
+  autoMaxTokens: "\u6309\u6A21\u578B\u81EA\u52A8\u8BBE\u7F6E\u4E0A\u9650",
+  autoMaxTokensDesc: "\u5F00\u542F\u540E\u6BCF\u8F6E\u6309\u5F53\u524D\u6A21\u578B\u7684\u8F93\u51FA\u4E0A\u9650\u53D1\u9001\uFF1B\u5173\u95ED\u540E\u4F7F\u7528\u4E0B\u9762\u624B\u586B\u7684\u56FA\u5B9A\u503C\u3002",
+  maxTokensAuto: "\u81EA\u52A8\uFF1A\u5F53\u524D\u6A21\u578B {model} \u7684\u5355\u6B21\u4E0A\u9650\u4E3A {n} tokens\uFF08\u672A\u8BC6\u522B\u7684\u6A21\u578B\u6309 8192\uFF09",
+  maxTokensAutoMagpie: "\u81EA\u52A8\uFF1A\u6309 Magpie \u7F51\u5173\u62A5\u544A\u7684\u6A21\u578B\u4E0A\u9650\u53D1\u9001\uFF08\u8DEF\u7531\u7EC4\u53D6\u7EC4\u5185\u6700\u4F4E\u4E0A\u9650\uFF09",
   maxIterations: "\u5355\u8F6E\u6700\u5927\u5DE5\u5177\u8C03\u7528\u6B21\u6570",
   autoContext: "\u81EA\u52A8\u9644\u5E26\u5F53\u524D\u7B14\u8BB0\u8DEF\u5F84",
   autoContextDesc: "\u5728\u7CFB\u7EDF\u63D0\u793A\u4E2D\u544A\u77E5\u667A\u80FD\u4F53\u5F53\u524D\u6B63\u5728\u7F16\u8F91\u7684\u7B14\u8BB0\uFF0C\u4FBF\u4E8E\u76F4\u63A5\u64CD\u4F5C\u3002",
@@ -1221,6 +1226,11 @@ var en = {
   modelPreset: "Common models (click to fill)",
   temperature: "Temperature",
   maxTokens: "Max tokens per reply",
+  maxTokensDesc: "Upper bound on the tokens generated in one reply.",
+  autoMaxTokens: "Derive the limit from the model",
+  autoMaxTokensDesc: "When on, each turn uses the selected model\u2019s output ceiling; turn it off to set a fixed value below.",
+  maxTokensAuto: "Auto: {model} allows {n} tokens per reply (unknown models use 8192)",
+  maxTokensAutoMagpie: "Auto: uses the ceiling reported by the Magpie gateway (routing groups use the lowest member limit)",
   maxIterations: "Max tool calls per turn",
   autoContext: "Include active note path",
   autoContextDesc: "Tells the agent which note you are editing, so it can act on it directly.",
@@ -2120,13 +2130,14 @@ var AgentView = class extends import_obsidian3.ItemView {
       phase = next;
       this.setRunStatus(next);
     };
+    const maxTokens = await this.plugin.effectiveMaxTokens(s);
     try {
       const base = {
         baseUrl: s.baseUrl,
         apiKey: s.apiKey,
         model: s.model,
         temperature: s.temperature,
-        maxTokens: s.maxTokens,
+        maxTokens,
         maxIterations: s.maxIterations,
         messages: this.messages,
         tools,
@@ -2434,16 +2445,59 @@ function parseMagpieModels(body) {
       id: m.id,
       displayName: typeof m.display_name === "string" ? m.display_name : void 0,
       ownedBy: typeof m.owned_by === "string" ? m.owned_by : void 0,
-      contextWindow: typeof m.context_window === "number" ? m.context_window : void 0
+      contextWindow: typeof m.context_window === "number" ? m.context_window : void 0,
+      maxOutputTokens: typeof m.max_output_tokens === "number" && Number.isFinite(m.max_output_tokens) && m.max_output_tokens > 0 ? m.max_output_tokens : void 0
     });
   }
   return out;
+}
+function modelOutputLimit(models, modelId) {
+  if (modelId.startsWith("group/")) {
+    const caps = models.map((m) => m.maxOutputTokens).filter((n) => typeof n === "number" && n > 0);
+    return caps.length ? Math.min(...caps) : void 0;
+  }
+  return models.find((m) => m.id === modelId)?.maxOutputTokens;
 }
 function pickDefaultMagpieModel(models, current) {
   const ids = models.map((m) => m.id);
   if (current && ids.includes(current))
     return current;
   return ids.find((id) => id.startsWith("auto/")) ?? ids.find((id) => id.startsWith("group/")) ?? ids[0] ?? "";
+}
+
+// limits.ts
+var DEFAULT_MAX_OUTPUT = 8192;
+var RULES = [
+  // DeepSeek V4.x: max_tokens accepts 1..384K. `deepseek-flash` is the V4.1
+  // Flash alias, so it shares the ceiling.
+  [/^deepseek-(v4|flash)/, 384e3],
+  [/^deepseek-(chat|reasoner)/, 8192],
+  // Zhipu GLM.
+  [/^glm-4\.6/, 128e3],
+  [/^glm-4\.5-air/, 96e3],
+  // Moonshot.
+  [/^kimi-k2/, 32768],
+  [/^moonshot-v1-32k/, 8192],
+  // DashScope.
+  [/^qwen3-coder-plus/, 65536],
+  [/^qwen-(plus|max)/, 32768],
+  // Volcengine Doubao (1.6 / Seed Code / 2.x share the 32K answer ceiling).
+  [/^doubao-seed/, 32768],
+  // Tencent Hunyuan TurboS and T1.
+  [/^hunyuan-/, 16384],
+  // Nous Hermes 4.
+  [/^hermes-4/, 32768]
+];
+function maxOutputForModel(model) {
+  const id = (model || "").trim().toLowerCase();
+  if (!id)
+    return DEFAULT_MAX_OUTPUT;
+  const bare = id.slice(id.lastIndexOf("/") + 1);
+  for (const [pattern, limit] of RULES) {
+    if (pattern.test(bare))
+      return limit;
+  }
+  return DEFAULT_MAX_OUTPUT;
 }
 
 // main.ts
@@ -2493,6 +2547,7 @@ var PROFILE_DEFAULTS = {
   model: "deepseek-v4.1-flash",
   temperature: 0.7,
   maxTokens: 8192,
+  autoMaxTokens: true,
   maxIterations: 12,
   autoContext: true,
   autoApprove: false,
@@ -2580,6 +2635,7 @@ var VaultAgentPlugin = class extends import_obsidian4.Plugin {
     this.loaded = false;
     /** The memory-note failure notice is shown once per session, not per turn. */
     this.memoryWarned = false;
+    this.catalogCache = null;
   }
   /** The agent a fresh conversation starts on (falls back to the active one). */
   get defaultProfile() {
@@ -2703,6 +2759,38 @@ var VaultAgentPlugin = class extends import_obsidian4.Plugin {
       throw new Error(`HTTP ${res.status}`);
     return parseMagpieModels(JSON.parse(res.text));
   }
+  async cachedMagpieModels(baseUrl) {
+    const url = magpieModelsUrl(baseUrl);
+    if (this.catalogCache?.url === url && Date.now() - this.catalogCache.at < 6e4) {
+      return this.catalogCache.models;
+    }
+    try {
+      const models = await this.fetchMagpieModels(baseUrl);
+      this.catalogCache = { url, at: Date.now(), models };
+      return models;
+    } catch {
+      return null;
+    }
+  }
+  /**
+   * Output cap for a turn. In auto mode the model decides: Magpie reports its
+   * own `max_output_tokens`, while direct providers use the curated table. The
+   * stored value is refreshed so the settings hint stays truthful.
+   */
+  async effectiveMaxTokens(profile) {
+    if (!profile.autoMaxTokens)
+      return profile.maxTokens;
+    let limit = maxOutputForModel(profile.model);
+    if (profile.providerId === "magpie") {
+      const models = await this.cachedMagpieModels(profile.baseUrl);
+      limit = models ? modelOutputLimit(models, profile.model) ?? profile.maxTokens : profile.maxTokens;
+    }
+    if (limit !== profile.maxTokens) {
+      profile.maxTokens = limit;
+      await this.saveSettings();
+    }
+    return limit;
+  }
   /**
    * One-click Magpie agent: fills the gateway base URL and key, then adopts a
    * model from the live catalog. When the gateway is down the agent is still
@@ -2723,9 +2811,12 @@ var VaultAgentPlugin = class extends import_obsidian4.Plugin {
   async adoptCatalogModel(profile) {
     try {
       const models = await this.fetchMagpieModels(profile.baseUrl);
+      this.catalogCache = { url: magpieModelsUrl(profile.baseUrl), at: Date.now(), models };
       const model = pickDefaultMagpieModel(models, profile.model);
       if (model)
         profile.model = model;
+      if (profile.autoMaxTokens)
+        await this.effectiveMaxTokens(profile);
       await this.saveSettings();
       return models;
     } catch {
@@ -2862,6 +2953,7 @@ var VaultAgentPlugin = class extends import_obsidian4.Plugin {
           model: data.model ?? PROFILE_DEFAULTS.model,
           temperature: data.temperature ?? PROFILE_DEFAULTS.temperature,
           maxTokens: data.maxTokens ?? PROFILE_DEFAULTS.maxTokens,
+          autoMaxTokens: data.autoMaxTokens ?? PROFILE_DEFAULTS.autoMaxTokens,
           maxIterations: data.maxIterations ?? PROFILE_DEFAULTS.maxIterations,
           autoContext: data.autoContext ?? PROFILE_DEFAULTS.autoContext,
           autoApprove: data.autoApprove ?? PROFILE_DEFAULTS.autoApprove,
@@ -3277,12 +3369,28 @@ var VASettingTab = class extends import_obsidian4.PluginSettingTab {
         control: { type: "slider", key: "temperature", min: 0, max: 2, step: 0.1 }
       },
       {
+        name: this.st("autoMaxTokens"),
+        desc: this.st("autoMaxTokensDesc"),
+        control: { type: "toggle", key: "autoMaxTokens" }
+      },
+      {
         name: this.st("maxTokens"),
+        desc: this.st("maxTokensDesc"),
+        visible: () => !this.profile.autoMaxTokens,
         control: {
           type: "number",
           key: "maxTokens",
           step: 1,
           validate: (v) => typeof v === "number" && v > 0 ? void 0 : "must be a positive number"
+        }
+      },
+      {
+        name: this.autoLimitText(),
+        searchable: false,
+        visible: () => this.profile.autoMaxTokens,
+        render: (setting) => {
+          setting.settingEl.addClass("va-hint");
+          return () => setting.settingEl.removeClass("va-hint");
         }
       },
       {
@@ -3393,8 +3501,20 @@ var VASettingTab = class extends import_obsidian4.PluginSettingTab {
       window.setTimeout(() => this.refreshTab(), 0);
       return;
     }
+    if (key === "autoMaxTokens") {
+      const s2 = this.profile;
+      s2.autoMaxTokens = value === true;
+      if (s2.autoMaxTokens)
+        await this.plugin.effectiveMaxTokens(s2);
+      await this.plugin.saveSettings();
+      window.setTimeout(() => this.refreshTab(), 0);
+      return;
+    }
     const s = this.profile;
     s[key] = value;
+    if (key === "model" && s.autoMaxTokens && s.providerId !== "magpie") {
+      s.maxTokens = maxOutputForModel(s.model);
+    }
     await this.plugin.saveSettings();
     if (key === "baseUrl" && this.preset?.catalog) {
       window.clearTimeout(this.baseUrlTimer);
@@ -3406,6 +3526,8 @@ var VASettingTab = class extends import_obsidian4.PluginSettingTab {
     }
     if (key === "providerId" && typeof value === "string") {
       applyProviderPreset(s, value);
+      if (s.autoMaxTokens && value !== "magpie")
+        s.maxTokens = maxOutputForModel(s.model);
       await this.plugin.saveSettings();
       if (this.preset?.catalog)
         void this.plugin.adoptCatalogModel(s).then(() => this.refreshTab());
@@ -3456,6 +3578,8 @@ var VASettingTab = class extends import_obsidian4.PluginSettingTab {
     }));
     new import_obsidian4.Setting(containerEl).setName(this.st("model")).setDesc(this.st("modelDesc")).addText((tx) => tx.setValue(s.model).onChange(async (v) => {
       s.model = v.trim();
+      if (s.autoMaxTokens && s.providerId !== "magpie")
+        s.maxTokens = maxOutputForModel(s.model);
       await this.plugin.saveSettings();
     }));
     this.renderProviderExtras(containerEl);
@@ -3463,13 +3587,24 @@ var VASettingTab = class extends import_obsidian4.PluginSettingTab {
       s.temperature = v;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian4.Setting(containerEl).setName(this.st("maxTokens")).addText((tx) => tx.setValue(String(s.maxTokens)).onChange(async (v) => {
-      const n = parseInt(v, 10);
-      if (n > 0) {
-        s.maxTokens = n;
-        await this.plugin.saveSettings();
-      }
+    new import_obsidian4.Setting(containerEl).setName(this.st("autoMaxTokens")).setDesc(this.st("autoMaxTokensDesc")).addToggle((tg) => tg.setValue(s.autoMaxTokens).onChange(async (v) => {
+      s.autoMaxTokens = v;
+      if (v)
+        await this.plugin.effectiveMaxTokens(s);
+      await this.plugin.saveSettings();
+      this.refreshTab();
     }));
+    if (s.autoMaxTokens) {
+      new import_obsidian4.Setting(containerEl).setName(this.autoLimitText()).setClass("va-hint");
+    } else {
+      new import_obsidian4.Setting(containerEl).setName(this.st("maxTokens")).setDesc(this.st("maxTokensDesc")).addText((tx) => tx.setValue(String(s.maxTokens)).onChange(async (v) => {
+        const n = parseInt(v, 10);
+        if (n > 0) {
+          s.maxTokens = n;
+          await this.plugin.saveSettings();
+        }
+      }));
+    }
     new import_obsidian4.Setting(containerEl).setName(this.st("maxIterations")).addText((tx) => tx.setValue(String(s.maxIterations)).onChange(async (v) => {
       const n = parseInt(v, 10);
       if (n > 0) {
@@ -3551,6 +3686,13 @@ var VASettingTab = class extends import_obsidian4.PluginSettingTab {
   get preset() {
     return PROVIDERS.find((p) => p.id === this.profile.providerId);
   }
+  /** What auto mode will send; Magpie reports the exact value at request time. */
+  autoLimitText() {
+    const p = this.profile;
+    if (p.providerId === "magpie")
+      return this.st("maxTokensAutoMagpie");
+    return tf(this.plugin.lang, "maxTokensAuto", { model: p.model || "\u2014", n: maxOutputForModel(p.model) });
+  }
   hasModelChips() {
     const preset = this.preset;
     return !!preset && (!!preset.catalog || preset.models.length > 0);
@@ -3566,7 +3708,7 @@ var VASettingTab = class extends import_obsidian4.PluginSettingTab {
     const preset = this.preset;
     if (!preset?.catalog) {
       for (const m of preset?.models ?? [])
-        this.addModelChip(el, m, m);
+        this.addModelChip(el, m, m, maxOutputForModel(m));
       return;
     }
     const url = magpieModelsUrl(profile.baseUrl);
@@ -3589,20 +3731,24 @@ var VASettingTab = class extends import_obsidian4.PluginSettingTab {
     else if (models)
       status.setText(tf(this.plugin.lang, "magpieModelsLoaded", { n: models.length }));
     for (const m of models ?? []) {
-      this.addModelChip(el, m.id, m.displayName ? `${m.displayName} \xB7 ${m.id}` : m.id);
+      this.addModelChip(el, m.id, m.displayName ? `${m.displayName} \xB7 ${m.id}` : m.id, m.maxOutputTokens);
     }
     if (!models && !this.magpieLoading && this.magpieFailedUrl !== url)
       void this.loadMagpieModels(el);
   }
-  addModelChip(el, modelId, label) {
+  addModelChip(el, modelId, label, maxOutput) {
     const btn = el.createEl("button", { text: label, attr: { title: modelId } });
     if (modelId === this.profile.model)
       btn.addClass("va-chip-active");
     btn.addEventListener("click", () => {
       this.profile.model = modelId;
+      if (this.profile.autoMaxTokens && maxOutput)
+        this.profile.maxTokens = maxOutput;
       void this.plugin.saveSettings();
       el.querySelectorAll("button").forEach((b) => b.removeClass("va-chip-active"));
       btn.addClass("va-chip-active");
+      if (this.profile.autoMaxTokens)
+        window.setTimeout(() => this.refreshTab(), 0);
     });
   }
   async loadMagpieModels(el) {

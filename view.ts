@@ -569,6 +569,7 @@ export class AgentView extends ItemView {
 			phase = next;
 			this.setRunStatus(next);
 		};
+		const maxTokens = await this.plugin.effectiveMaxTokens(s);
 
 		try {
 			// Provider-agnostic turn options; the protocol decides which loop runs.
@@ -577,7 +578,7 @@ export class AgentView extends ItemView {
 				apiKey: s.apiKey,
 				model: s.model,
 				temperature: s.temperature,
-				maxTokens: s.maxTokens,
+				maxTokens,
 				maxIterations: s.maxIterations,
 				messages: this.messages,
 				tools,

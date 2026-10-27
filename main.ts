@@ -7,7 +7,9 @@ import {
 	MEMORY_FILE, MEMORY_FOLDER, dueEntries, markForgotten, markReviewed,
 	mergeSession, parseMemoryFile, renderMemoryFile, type MemoryEntry
 } from './memory';
-import { MAGPIE_BASE_URL, MAGPIE_KEY, magpieModelsUrl, parseMagpieModels, pickDefaultMagpieModel, type MagpieModel } from './magpie';
+import { MAGPIE_BASE_URL, MAGPIE_KEY, magpieModelsUrl, modelOutputLimit, parseMagpieModels, pickDefaultMagpieModel, type MagpieModel } from './magpie';
+
+import { DEFAULT_MAX_OUTPUT, maxOutputForModel } from './limits';
 
 /** Wire protocol a provider speaks. Coding Plan (and Anthropic itself) use 'anthropic'. */
 export type Protocol = 'openai' | 'anthropic';
@@ -80,6 +82,8 @@ export interface AgentProfile {
 	model: string;
 	temperature: number;
 	maxTokens: number;
+	/** Derive `maxTokens` from the selected model instead of using the fixed value. */
+	autoMaxTokens: boolean;
 	maxIterations: number;
 	autoContext: boolean;
 	autoApprove: boolean;
@@ -120,6 +124,7 @@ const PROFILE_DEFAULTS: Omit<AgentProfile, 'id' | 'name'> = {
 	model: 'deepseek-v4.1-flash',
 	temperature: 0.7,
 	maxTokens: 8192,
+	autoMaxTokens: true,
 	maxIterations: 12,
 	autoContext: true,
 	autoApprove: false,
@@ -245,6 +250,7 @@ export default class VaultAgentPlugin extends Plugin {
 	/** The memory-note failure notice is shown once per session, not per turn. */
 	private memoryWarned = false;
 
+	private catalogCache: { url: string; at: number; models: MagpieModel[] } | null = null;
 	/** The agent a fresh conversation starts on (falls back to the active one). */
 	get defaultProfile(): AgentProfile {
 		const s = this.settings;
@@ -378,6 +384,39 @@ export default class VaultAgentPlugin extends Plugin {
 		return parseMagpieModels(JSON.parse(res.text));
 	}
 
+	private async cachedMagpieModels(baseUrl: string): Promise<MagpieModel[] | null> {
+		const url = magpieModelsUrl(baseUrl);
+		if (this.catalogCache?.url === url && Date.now() - this.catalogCache.at < 60000) {
+			return this.catalogCache.models;
+		}
+		try {
+			const models = await this.fetchMagpieModels(baseUrl);
+			this.catalogCache = { url, at: Date.now(), models };
+			return models;
+		} catch {
+			return null;
+		}
+	}
+
+	/**
+	 * Output cap for a turn. In auto mode the model decides: Magpie reports its
+	 * own `max_output_tokens`, while direct providers use the curated table. The
+	 * stored value is refreshed so the settings hint stays truthful.
+	 */
+	async effectiveMaxTokens(profile: AgentProfile): Promise<number> {
+		if (!profile.autoMaxTokens) return profile.maxTokens;
+		let limit = maxOutputForModel(profile.model);
+		if (profile.providerId === 'magpie') {
+			const models = await this.cachedMagpieModels(profile.baseUrl);
+			// An unreadable gateway must not invent a limit for its routed model.
+			limit = models ? (modelOutputLimit(models, profile.model) ?? profile.maxTokens) : profile.maxTokens;
+		}
+		if (limit !== profile.maxTokens) {
+			profile.maxTokens = limit;
+			await this.saveSettings();
+		}
+		return limit;
+	}
 	/**
 	 * One-click Magpie agent: fills the gateway base URL and key, then adopts a
 	 * model from the live catalog. When the gateway is down the agent is still
@@ -399,8 +438,10 @@ export default class VaultAgentPlugin extends Plugin {
 	async adoptCatalogModel(profile: AgentProfile): Promise<MagpieModel[] | null> {
 		try {
 			const models = await this.fetchMagpieModels(profile.baseUrl);
+			this.catalogCache = { url: magpieModelsUrl(profile.baseUrl), at: Date.now(), models };
 			const model = pickDefaultMagpieModel(models, profile.model);
 			if (model) profile.model = model;
+			if (profile.autoMaxTokens) await this.effectiveMaxTokens(profile);
 			await this.saveSettings();
 			return models;
 		} catch {
@@ -546,6 +587,7 @@ export default class VaultAgentPlugin extends Plugin {
 					model: data.model ?? PROFILE_DEFAULTS.model,
 					temperature: data.temperature ?? PROFILE_DEFAULTS.temperature,
 					maxTokens: data.maxTokens ?? PROFILE_DEFAULTS.maxTokens,
+					autoMaxTokens: data.autoMaxTokens ?? PROFILE_DEFAULTS.autoMaxTokens,
 					maxIterations: data.maxIterations ?? PROFILE_DEFAULTS.maxIterations,
 					autoContext: data.autoContext ?? PROFILE_DEFAULTS.autoContext,
 					autoApprove: data.autoApprove ?? PROFILE_DEFAULTS.autoApprove,
@@ -947,12 +989,28 @@ class VASettingTab extends PluginSettingTab {
 				control: { type: 'slider', key: 'temperature', min: 0, max: 2, step: 0.1 }
 			},
 			{
+				name: this.st('autoMaxTokens'),
+				desc: this.st('autoMaxTokensDesc'),
+				control: { type: 'toggle', key: 'autoMaxTokens' }
+			},
+			{
 				name: this.st('maxTokens'),
+				desc: this.st('maxTokensDesc'),
+				visible: () => !this.profile.autoMaxTokens,
 				control: {
 					type: 'number',
 					key: 'maxTokens',
 					step: 1,
 					validate: (v) => (typeof v === 'number' && v > 0 ? undefined : 'must be a positive number')
+				}
+			},
+			{
+				name: this.autoLimitText(),
+				searchable: false,
+				visible: () => this.profile.autoMaxTokens,
+				render: (setting) => {
+					setting.settingEl.addClass('va-hint');
+					return () => setting.settingEl.removeClass('va-hint');
 				}
 			},
 			{
@@ -1066,8 +1124,19 @@ class VASettingTab extends PluginSettingTab {
 			window.setTimeout(() => this.refreshTab(), 0);
 			return;
 		}
+		if (key === 'autoMaxTokens') {
+			const s = this.profile;
+			s.autoMaxTokens = value === true;
+			if (s.autoMaxTokens) await this.plugin.effectiveMaxTokens(s);
+			await this.plugin.saveSettings();
+			window.setTimeout(() => this.refreshTab(), 0);
+			return;
+		}
 		const s = this.profile;
 		(s as unknown as Record<string, unknown>)[key] = value;
+		if (key === 'model' && s.autoMaxTokens && s.providerId !== 'magpie') {
+			s.maxTokens = maxOutputForModel(s.model);
+		}
 		await this.plugin.saveSettings();
 		if (key === 'baseUrl' && this.preset?.catalog) {
 			// Typing a port must not fire a request per keystroke, and re-rendering
@@ -1083,6 +1152,7 @@ class VASettingTab extends PluginSettingTab {
 			// re-render so those rows show the new values (deferred so we do not
 			// tear down the dropdown mid-change-event).
 			applyProviderPreset(s, value);
+			if (s.autoMaxTokens && value !== 'magpie') s.maxTokens = maxOutputForModel(s.model);
 			await this.plugin.saveSettings();
 			if (this.preset?.catalog) void this.plugin.adoptCatalogModel(s).then(() => this.refreshTab());
 			else window.setTimeout(() => this.refreshTab(), 0);
@@ -1156,7 +1226,11 @@ class VASettingTab extends PluginSettingTab {
 			.setDesc(this.st('modelDesc'))
 			.addText(tx => tx
 				.setValue(s.model)
-				.onChange(async v => { s.model = v.trim(); await this.plugin.saveSettings(); }));
+				.onChange(async v => {
+					s.model = v.trim();
+					if (s.autoMaxTokens && s.providerId !== 'magpie') s.maxTokens = maxOutputForModel(s.model);
+					await this.plugin.saveSettings();
+				}));
 
 		this.renderProviderExtras(containerEl);
 
@@ -1164,11 +1238,29 @@ class VASettingTab extends PluginSettingTab {
 			.addSlider(sl => sl.setLimits(0, 2, 0.1).setValue(s.temperature)
 				.onChange(async v => { s.temperature = v; await this.plugin.saveSettings(); }));
 
-		new Setting(containerEl).setName(this.st('maxTokens'))
-			.addText(tx => tx.setValue(String(s.maxTokens)).onChange(async v => {
-				const n = parseInt(v, 10);
-				if (n > 0) { s.maxTokens = n; await this.plugin.saveSettings(); }
+		new Setting(containerEl)
+			.setName(this.st('autoMaxTokens'))
+			.setDesc(this.st('autoMaxTokensDesc'))
+			.addToggle(tg => tg.setValue(s.autoMaxTokens).onChange(async v => {
+				s.autoMaxTokens = v;
+				if (v) await this.plugin.effectiveMaxTokens(s);
+				await this.plugin.saveSettings();
+				this.refreshTab();
 			}));
+
+		if (s.autoMaxTokens) {
+			new Setting(containerEl)
+				.setName(this.autoLimitText())
+				.setClass('va-hint');
+		} else {
+			new Setting(containerEl)
+				.setName(this.st('maxTokens'))
+				.setDesc(this.st('maxTokensDesc'))
+				.addText(tx => tx.setValue(String(s.maxTokens)).onChange(async v => {
+					const n = parseInt(v, 10);
+					if (n > 0) { s.maxTokens = n; await this.plugin.saveSettings(); }
+				}));
+		}
 
 		new Setting(containerEl).setName(this.st('maxIterations'))
 			.addText(tx => tx.setValue(String(s.maxIterations)).onChange(async v => {
@@ -1298,6 +1390,12 @@ class VASettingTab extends PluginSettingTab {
 	private get preset(): ProviderPreset | undefined {
 		return PROVIDERS.find(p => p.id === this.profile.providerId);
 	}
+	/** What auto mode will send; Magpie reports the exact value at request time. */
+	private autoLimitText(): string {
+		const p = this.profile;
+		if (p.providerId === 'magpie') return this.st('maxTokensAutoMagpie');
+		return tf(this.plugin.lang, 'maxTokensAuto', { model: p.model || '—', n: maxOutputForModel(p.model) });
+	}
 
 	private hasModelChips(): boolean {
 		const preset = this.preset;
@@ -1315,7 +1413,7 @@ class VASettingTab extends PluginSettingTab {
 		const preset = this.preset;
 
 		if (!preset?.catalog) {
-			for (const m of preset?.models ?? []) this.addModelChip(el, m, m);
+			for (const m of preset?.models ?? []) this.addModelChip(el, m, m, maxOutputForModel(m));
 			return;
 		}
 
@@ -1337,21 +1435,23 @@ class VASettingTab extends PluginSettingTab {
 		else if (models) status.setText(tf(this.plugin.lang, 'magpieModelsLoaded', { n: models.length }));
 
 		for (const m of models ?? []) {
-			this.addModelChip(el, m.id, m.displayName ? `${m.displayName} · ${m.id}` : m.id);
+			this.addModelChip(el, m.id, m.displayName ? `${m.displayName} · ${m.id}` : m.id, m.maxOutputTokens);
 		}
 
 		// Nothing cached for this gateway yet, and no read in flight: go read it.
 		if (!models && !this.magpieLoading && this.magpieFailedUrl !== url) void this.loadMagpieModels(el);
 	}
 
-	private addModelChip(el: HTMLElement, modelId: string, label: string): void {
+	private addModelChip(el: HTMLElement, modelId: string, label: string, maxOutput?: number): void {
 		const btn = el.createEl('button', { text: label, attr: { title: modelId } });
 		if (modelId === this.profile.model) btn.addClass('va-chip-active');
 		btn.addEventListener('click', () => {
 			this.profile.model = modelId;
+			if (this.profile.autoMaxTokens && maxOutput) this.profile.maxTokens = maxOutput;
 			void this.plugin.saveSettings();
 			el.querySelectorAll('button').forEach(b => b.removeClass('va-chip-active'));
 			btn.addClass('va-chip-active');
+			if (this.profile.autoMaxTokens) window.setTimeout(() => this.refreshTab(), 0);
 		});
 	}
 

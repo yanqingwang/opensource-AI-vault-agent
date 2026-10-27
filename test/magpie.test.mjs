@@ -19,7 +19,7 @@ await build({
 	format: 'esm',
 	platform: 'node'
 });
-const { MAGPIE_BASE_URL, MAGPIE_KEY, magpieModelsUrl, parseMagpieModels, pickDefaultMagpieModel } =
+const { MAGPIE_BASE_URL, MAGPIE_KEY, magpieModelsUrl, modelOutputLimit, parseMagpieModels, pickDefaultMagpieModel } =
 	await import(pathToFileURL(out).href);
 
 // --- 1. gateway key and base URL --------------------------------------------
@@ -46,7 +46,7 @@ const { MAGPIE_BASE_URL, MAGPIE_KEY, magpieModelsUrl, parseMagpieModels, pickDef
 	const body = {
 		object: 'list',
 		data: [
-			{ id: 'group/smart-split', display_name: '难题给强模型', owned_by: 'workbuddy-ai', context_window: 1000000 },
+			{ id: 'group/smart-split', display_name: '难题给强模型', owned_by: 'workbuddy-ai', context_window: 1000000, max_output_tokens: 128000 },
 			{ id: 'auto/deepseek-v4.1-flash', display_name: 'Deepseek-V4.1-Flash', owned_by: 'workbuddy' },
 			{ id: 'trae-cn/glm-5.3-flash' },
 			{ display_name: 'no id' },
@@ -60,6 +60,8 @@ const { MAGPIE_BASE_URL, MAGPIE_KEY, magpieModelsUrl, parseMagpieModels, pickDef
 		'entries without a usable id are dropped');
 	assert.equal(models[0].displayName, '难题给强模型');
 	assert.equal(models[0].contextWindow, 1000000);
+	assert.equal(models[0].maxOutputTokens, 128000);
+	assert.equal(models[1].maxOutputTokens, undefined, 'a gateway without the field reports no cap');
 	assert.equal(models[1].ownedBy, 'workbuddy');
 	assert.equal(models[2].displayName, undefined);
 }
@@ -85,4 +87,19 @@ const { MAGPIE_BASE_URL, MAGPIE_KEY, magpieModelsUrl, parseMagpieModels, pickDef
 	assert.equal(pickDefaultMagpieModel([]), '', 'an empty catalog leaves the model untouched');
 }
 
+// --- 6. output ceiling for catalogue models ---------------------------------
+{
+	const catalogue = [
+		{ id: 'group/smart-split', maxOutputTokens: 128000 },
+		{ id: 'raccoon/sn-deepseek', maxOutputTokens: 100000 },
+		{ id: 'raccoon/sn-sensenova', maxOutputTokens: 64000 }
+	];
+	assert.equal(modelOutputLimit(catalogue, 'raccoon/sn-deepseek'), 100000,
+		'a concrete model reports its own ceiling');
+	assert.equal(modelOutputLimit(catalogue, 'group/smart-split'), 64000,
+		'a routing group takes the smallest member ceiling');
+	assert.equal(modelOutputLimit(catalogue, 'gone/model'), undefined);
+	assert.equal(modelOutputLimit([{ id: 'group/x' }], 'group/x'), undefined,
+		'a group without reported ceilings invents nothing');
+}
 console.log('magpie.test.mjs: all assertions passed');

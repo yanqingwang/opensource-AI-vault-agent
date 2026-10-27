@@ -174,11 +174,25 @@
 .va-assistant ul, .va-assistant ol, .va-welcome ul, .va-welcome ol { margin: 0.35em 0; padding-inline-start: 1.4em; }
 .va-assistant pre, .va-assistant blockquote, .va-welcome pre { margin: 0.4em 0; }
 /* Section breaks written as `---`: the theme rule is thick with 2em margins,
-   which reads as a big gap plus a line inside a chat bubble. */
+   which reads as a big gap plus a line inside a chat bubble. Long answers made
+   of many short sections showed a rule between every paragraph — "后面的线越来
+   越多" — because each break carries its own line. Render a break as spacing,
+   and it is lighter on the eye than the solid line. */
 .va-assistant hr, .va-welcome hr {
-  margin: 0.6em 0;
+  margin: 0.45em 0;
   border: none;
-  border-top: 1px solid var(--background-modifier-border);
+  height: 0;
+  border-top: 1px dashed var(--background-modifier-border);
+  width: auto;
+}
+/* A rule flanked by short sections still reads as clutter: collapse every run
+   of consecutive rules (and rules hugging an empty paragraph) to one. */
+.va-assistant hr + hr, .va-welcome hr + hr {
+  display: none;
+}
+.va-assistant hr:first-child, .va-welcome hr:first-child,
+.va-assistant hr:last-child, .va-welcome hr:last-child {
+  display: none;
 }
 .va-welcome {
   border: 1px dashed var(--background-modifier-border);
@@ -189,6 +203,14 @@
   line-height: 1.5;
 }
 
+/* The transcript is a flex column, so every child shrinks when the list is
+   scrolled to the bottom — a chip with a collapsed <details> collapsed to a 2px
+   sliver, which read as "more and more lines" appearing under an answer. Never
+   let a message shrink below the height of its own content. */
+.va-messages > * {
+  flex: 0 0 auto;
+  min-height: fit-content;
+}
 .va-tool-chip {
   border: 1px solid var(--background-modifier-border);
   border-radius: 8px;

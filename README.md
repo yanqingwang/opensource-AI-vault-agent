@@ -1,18 +1,194 @@
 # AI Vault Agent CN
 
-[English](README.en.md) · [GitHub](https://github.com/yanqingwang/opensource-AI-vault-agent) · [MIT License](LICENSE)
-
-**AI Vault Agent CN** is an Obsidian plugin that turns your vault into an agentic workspace. It talks directly to LLM APIs that are usable from mainland China — DeepSeek, Zhipu GLM, Kimi (Moonshot), Qwen (DashScope), Volcengine Ark / Ark Coding Plan (Doubao-Seed-Code) and Tencent Hunyuan — as well as any OpenAI- or Anthropic-compatible endpoint. You can configure several agents (each with its own provider, API key and prompt) and switch between them from the view header. The agent can search, read, create and edit your notes on its own. No CLI, no overseas account and no environment variables required.
-
-> Chinese-first: the UI and the notes below are written in Chinese by default, but an English UI and a full English README are included. Switch the language in Settings → AI Vault Agent CN → Language. See [README.en.md](README.en.md) for the complete English documentation.
+[English](#english) | [中文](#中文)
 
 ---
+
+## English
+
+A China-first Obsidian agent plugin that talks directly to OpenAI-compatible and Anthropic Messages LLM APIs and can autonomously **search, read, create and edit** your notes. No CLI to install, no overseas account, no environment variables to configure. Configure **multiple agents** (each with its own provider, key and prompt) and switch between them from the header.
+
+**Current version: v0.3.1**
+
+### Why
+
+The closest equivalent overseas ([Claudian](https://github.com/yishentu/claudian)) requires the Claude Code CLI and an overseas subscription, which is both hard to set up and hard to pay for from mainland China. Vault Agent turns the same agent experience into **paste one API key and go**:
+
+| What you want | Pick this preset |
+|---|---|
+| Your local Magpie gateway (one entry for every subscription, key and routing group) | `Magpie 本地网关 (本机)`, or **New from Magpie template** |
+| DeepSeek | `DeepSeek` |
+| Zhipu GLM / Z.ai | `智谱 GLM` / `Z.ai` |
+| Kimi (Moonshot) | `Kimi` |
+| Qwen (DashScope — the models behind Qoder) | `通义 Qwen (DashScope)` |
+| Doubao/Seed (Volcengine Ark — the models behind Trae) | `火山方舟 Ark` (enter your endpoint ID) |
+| Doubao-Seed-Code (the Claude Code–compatible Coding Plan) | `火山方舟 Coding Plan` (both Anthropic and OpenAI-compatible entries) |
+| Tencent Hunyuan (the models behind WorkBuddy) | `腾讯混元 Hunyuan` |
+| Hermes (Nous Research) | `Hermes` or `OpenRouter` |
+| Any other OpenAI-compatible service | `自定义 OpenAI 兼容端点` (custom) |
+| Any other Anthropic-compatible service | `自定义 Anthropic 兼容端点` (custom) |
+
+> Preset names above are the labels shown in the plugin UI (Chinese). Trae / Qoder / WorkBuddy do not expose personal API channels; this plugin talks to the official APIs of the model vendors behind them (Volcengine Ark, DashScope, Tencent Hunyuan), which you can sign up for and pay for in RMB.
+
+### Features
+
+- **Agent tool calls**: `search_notes` / `read_note` / `list_notes` / `get_active_note` / `create_note` / `edit_note` (exact replace) / `append_note` / `read_properties`, with multiple steps per turn.
+- **Streaming**: SSE rendering with reasoning support (DeepSeek-R1 / Kimi thinking and friends); falls back to non-streaming (Obsidian `requestUrl`) when the direct connection fails.
+- **Local proxy (optional)**: route AI requests through a local HTTP proxy (absolute-URI forwarding for `http`, CONNECT tunnelling for `https`). Desktop only.
+- **Web search (optional)**: use the provider's own search (GLM / Kimi / Qwen / OpenRouter), or the bundled `web_search` tool backed by Tavily — so providers without native search, DeepSeek included, can search too.
+- **Write confirmation**: creating or editing asks first by default; can be auto-approved in settings.
+- **Context aware**: the agent is told which note is open, so it can work on what you are editing.
+- **China-first**: a Chinese system prompt and UI are built in, switchable to English; you can also supply your own system prompt.
+- **History, kept and searchable**: recent messages are saved and restored after a restart; the sidebar **History** button searches past conversations and loads one back into the chat, and the full transcript is kept in `history.jsonl` (see below).
+- **Multiple agents, instant switching**: each agent keeps its own provider, base URL, API key, model, generation settings, system prompt and search config; the header switcher (or the "Switch agent" command) swaps agents on the fly, keeping the conversation.
+- **Anthropic Messages protocol**: alongside the OpenAI-compatible protocol, Anthropic Messages (`POST /v1/messages`) is supported, so Anthropic-compatible endpoints such as Volcengine Ark's Coding Plan work directly.
+- **Magpie gateway (one-click template)**: one button creates an agent wired to the Magpie gateway, and the model list is read live from its `/v1/models` instead of being typed by hand.
+- **Copyable messages**: every user message and answer carries a copy button (shown on hover); clicking it copies that message as plain text/Markdown and flips the icon to a check.
+- **Conversations are memory**: every turn updates the single note `CN AI Agent/记忆.md` and schedules it on a forgetting curve, so a conversation is searchable, linkable and actually comes back for review.
+
+### Multiple agents and Volcengine Ark Coding Plan
+
+Settings → AI Vault Agent CN → the **Agents** section manages your agents:
+
+- **New blank agent**: start from defaults, pick a provider and paste a key.
+- **New from Volcengine Coding Plan template**: pre-fills the Anthropic protocol, base URL `https://ark.cn-beijing.volces.com/api/coding` and model `doubao-seed-code-preview-latest` — just paste the plan's API key.
+- Click an agent row to make it **active**; rename inline, duplicate or delete (at least one agent is kept).
+- Two badges: **active** (the one this turn uses) and **default** (the one a fresh conversation starts on). The star at the end of a row sets the default; switching agents does not change which one is default.
+
+> **Volcengine Ark Coding Plan**: buy a Coding Plan (Lite/Pro) in the Ark console first, then create a **plan-specific** API key (it is not interchangeable with a general Ark key); the model ID is whatever the console lists. The plan exposes two entries and both have presets:
+>
+> | Preset | Protocol | Base URL |
+> |---|---|---|
+> | `火山方舟 Coding Plan (Anthropic 协议)` | Anthropic Messages | `https://ark.cn-beijing.volces.com/api/coding` (POST `/v1/messages`) |
+> | `火山方舟 Coding Plan (OpenAI 兼容)` | OpenAI-compatible | `https://ark.cn-beijing.volces.com/api/coding/v3` (POST `/chat/completions`) |
+>
+> The Anthropic entry is the Claude Code path documented by Volcengine, and the template button uses it; if it is not available on your plan, switch to the OpenAI-compatible entry. Coding Plan has **no provider-native web search** — configure Tavily (below) if you need search.
+
+Switching agents **keeps the conversation**; the next message goes to the new agent, and the history panel tags each session with the agent that produced it.
+
+### Magpie gateway (one-click template)
+
+[Magpie](https://usemagpie.ai) is a local AI gateway (default `127.0.0.1:3425`) that turns the subscriptions, vendor API keys and routing groups you configured inside it into one catalog of `provider/model` ids, and speaks OpenAI Chat and Anthropic Messages itself. To this plugin it is **a single provider**, not one configuration per vendor.
+
+Settings → AI Vault Agent CN → Agents → **New from Magpie template**:
+
+1. An agent is created with base URL `http://127.0.0.1:3425/v1` and API key `magpie-ai-vault-agent`.
+2. The plugin then reads `GET /v1/models` from the gateway and picks a model: `auto/…` (Magpie's own routing) first, then a `group/…` routing group, then the first enabled model.
+3. Those models are listed under **Model ID** — click one to switch; press **Reload** after changing anything in Magpie.
+
+Boundaries worth knowing:
+
+- **Nothing is sent while the gateway is down** (`net::ERR_CONNECTION_REFUSED`). When Magpie is off, switch to another agent.
+- **The key is not a secret.** The local gateway accepts any key; `magpie-ai-vault-agent` only makes Magpie's usage page and routing rules attribute this client to `ai-vault-agent`. Switching to a real vendor clears it, so it can never be mistaken for a credential.
+- **The port can move.** If you change `port` in Magpie's `settings.json`, change the base URL to match; Magpie's "share on the local network" address works too.
+- Model ids are Magpie's `provider/model` (or a routing group name) exactly as `/v1/models` returns them; this plugin ships no fixed list.
+
+### Conversation memory (CN AI Agent/记忆.md)
+
+With **Save conversations as vault memory** on (the default), every turn updates **one** memory note:
+
+```
+CN AI Agent/记忆.md
+```
+
+Not one file per conversation — that only piles up files nobody reopens. Every memory lives in this one note, each with its own review schedule, so the note itself says what to review today.
+
+- **Scheduled on a forgetting curve**: a new memory is due the next day, then every 1 / 2 / 4 / 7 / 15 / 30 / 60 / 120 / 240 days. "Remembered" climbs a rung; "Forgot" drops back to day one.
+- **Two ways in**: the "Review due memory" command walks the due entries; the note's `## 今日待复习` section lists them. On start-up the plugin mentions how many are due.
+- **What the note holds**: frontmatter (updated/entries/due/tags), the due list, then every memory with its session, turn count, next review date, review count, a memory-strength percentage and the question/answer pairs.
+- **The prose is safe to edit by hand**; the trailing `<!-- memory:data -->` comment is the schedule, and editing it loses review progress.
+- Turning the switch off stops all writes.
+
+### Installation
+
+**Community plugins**: Settings → Community plugins → Browse → search for **AI Vault Agent CN** → Install, then Enable.
+
+**Manual**: copy `main.js`, `manifest.json` and `styles.css` into `<vault>/.obsidian/plugins/vault-agent/`, restart Obsidian and enable the plugin.
+
+**Requirements**: Obsidian 1.7.2 or newer; works on desktop and mobile (the local proxy is desktop-only).
+
+### Usage
+
+1. Settings → AI Vault Agent CN → in **Agents**, create or pick an agent → pick a provider → paste your API key → pick a model.
+2. Click the ribbon icon (or run "打开智能体 / open agent" from the command palette) to open the chat sidebar.
+3. For example: "find my recent notes about X and turn them into a MOC", "rewrite the end of the current note as a summary paragraph".
+4. Click the **History** icon in the header to search past conversations; click a row to load it back and keep chatting.
+
+### Local proxy
+
+Settings → AI Vault Agent CN → **Local proxy (optional)**: enter `host:port` (e.g. `http://127.0.0.1:9000`, or `user:pass@host:port` when the proxy needs authentication) and AI requests go through it — handy for inspecting traffic with a local proxy or for relaying on a restricted network. Leave it empty to connect directly. Desktop only; SOCKS is not supported.
+
+### Web search
+
+A model's training data has a cut-off, and your notes may not cover recent events. Settings → AI Vault Agent CN → **Web search** has four modes:
+
+| Mode | Behaviour |
+|---|---|
+| Off | Default. The model uses its own knowledge plus your notes |
+| Auto | Provider-native search when the provider has it, otherwise the plugin tool (needs a Tavily key) |
+| Provider-native only | GLM / Z.ai / Kimi / Qwen / OpenRouter |
+| Plugin tool only | Tavily, so **any** provider can search — DeepSeek included |
+
+- **Provider-native** search needs no extra key; the vendor does the retrieval. DeepSeek's API has no web search, and Volcengine Ark's search plugin **disables function calling** while it is on (which would break every vault tool), so Ark is not wired up. **Volcengine Ark Coding Plan has no native search either** — use "Plugin tool only" with a Tavily key if you need it.
+- **The plugin tool** needs a Tavily key: sign up at [app.tavily.com](https://app.tavily.com) (free tier: 1,000 searches/month) and paste it into "Tavily API key". Search results are merged into the context, so they cost both tokens and a per-search fee.
+- "Results per search" and "Search depth" (basic = 1 credit, advanced = 2) are configurable.
+- If a provider rejects the search parameters, the turn is retried once without them instead of failing.
+
+### Conversation history
+
+While you chat, every event (user message, assistant reply, reasoning, tool call and tool result) is appended to
+`.obsidian/plugins/vault-agent/history.jsonl`. `data.json` keeps only the last 40 messages, which is what restores the chat view;
+the JSONL is the complete record, with timestamps, session ids and tool calls.
+
+The **History** button in the sidebar header lists and searches those conversations directly, and clicking a row loads it back into the chat — no command line needed.
+
+Importing the JSONL into SQLite with `tools/history_db.py` (standard library only) gives you the same thing from a terminal:
+
+```bash
+python tools/history_db.py import                  # incremental; safe to re-run
+python tools/history_db.py search 同步任务          # full-text search (FTS5 trigram, so Chinese works)
+python tools/history_db.py search --tool read_note  # filter by tool
+python tools/history_db.py sessions                # list conversations
+python tools/history_db.py show <session prefix>    # print one conversation in full
+python tools/history_db.py stats
+```
+
+The database lands next to the JSONL (`history.db`) by default. Import deduplicates on event id, so re-running only adds what is new; the paths can be overridden with `--vault <vault root>` or `--jsonl/--db`.
+
+### Safety
+
+- The API key is stored only in local Obsidian config (`data.json`) and is never uploaded.
+- The agent has no tools to delete or move files, or to run commands; write actions need confirmation by default.
+- Long notes and tool results are truncated to keep token cost down.
+
+### Development
+
+```bash
+npm install
+npm run build   # tsc check + esbuild -> main.js
+npm test        # node end-to-end tests (mock SSE server + agent loop + history recorder)
+```
+
+### License
+
+MIT
+
+### Issues & Feedback
+
+- GitHub Issues: <https://github.com/yanqingwang/opensource-AI-vault-agent/issues>
+- Email: wangyantsing@qq.com
+
+Please include your Obsidian version, the plugin version, a description or screenshot of the problem, and what you expected to happen.
+
+---
+
+## 中文
 
 中文优先的 Obsidian vault 智能体插件（插件市场名 **AI Vault Agent CN**）——直连国产大模型 API（OpenAI 兼容协议 + Anthropic Messages 协议），智能体可自主**搜索、读取、创建、修改**你的笔记。无需安装任何 CLI，无需海外账号，无需配置环境变量。可配置**多个 Agent**（各自的服务商、Key、提示词），在标题栏一键切换。
 
 **当前版本：v0.3.1**
 
-## 为什么做这个
+### 为什么做这个
 
 海外的同类形态（[Claudian](https://github.com/yishentu/claudian)）依赖 Claude Code CLI 与海外订阅，国内用户配置门槛高且支付困难。Vault Agent 把同一形态的智能体体验变成**填一个 API Key 就能用**：
 
@@ -32,7 +208,7 @@
 
 > Trae / Qoder / WorkBuddy 本体不对外提供个人 API 通道，本插件支持的是它们背后的模型服务商官方 API（火山方舟、DashScope、腾讯混元），申请即用、人民币计费。
 
-## 功能
+### 功能
 
 - **智能体工具调用**：`search_notes` / `read_note` / `list_notes` / `get_active_note` / `create_note` / `edit_note`（精确替换）/ `append_note` / `read_properties`，单轮可多步连续操作。
 - **流式输出**：SSE 流式渲染，支持 reasoning（DeepSeek-R1 / Kimi thinking 等）；直连失败自动降级为非流式（Obsidian requestUrl）。
@@ -48,7 +224,7 @@
 - **消息可复制**：每条用户消息与回答右上角都有复制按钮（悬停出现），点击即复制该条消息的纯文本/Markdown，图标短暂变成 ✓。
 - **对话即记忆**：每轮对话结束自动更新库内 `CN AI Agent/记忆.md` 这一篇笔记，并按遗忘曲线安排复习——对话因此可搜索、可双链、会被主动想起。
 
-## 多 Agent 与火山方舟 Coding Plan
+### 多 Agent 与火山方舟 Coding Plan
 
 设置 → AI Vault Agent CN → **智能体 (Agents)** 区域可管理多个 Agent：
 
@@ -69,7 +245,7 @@
 
 切换 Agent 时**对话上下文保留**，下一条消息即由新 Agent 应答；侧栏历史记录里每个会话会标注产生它的 Agent。
 
-## Magpie 本地网关（一键模板）
+### Magpie 本地网关（一键模板）
 
 [Magpie](https://usemagpie.ai) 是本机的一个 AI 网关（默认 `127.0.0.1:3425`），把你在里面配好的订阅、各家 API Key 和路由组统一成一套 `provider/model` 模型列表，并同时听懂 OpenAI Chat、Anthropic Messages 等协议。对本插件来说，它等于**一个服务商**，而不是每家用一套配置。
 
@@ -86,7 +262,7 @@
 - **端口可改**。Magpie 的 `settings.json` 里改了 `port`，把 Base URL 一起改掉即可；也支持 Magpie 的「共享到局域网」地址。
 - 模型名就是 Magpie 的 `provider/model`（或路由组名），以 `/v1/models` 返回为准，本插件不内置任何固定列表。
 
-## 对话记忆（CN AI Agent/记忆.md）
+### 对话记忆（CN AI Agent/记忆.md）
 
 开启后（默认开启，设置 → AI Vault Agent CN → **把对话保存为库内记忆**），**每轮对话结束**都会更新**同一个**记忆文件：
 
@@ -105,7 +281,7 @@ CN AI Agent/记忆.md
 - **可安全手工编辑正文**；末尾 `<!-- memory:data -->` 注释是排期数据，改了会丢复习进度。
 - 关掉开关即完全停止写入。
 
-## 安装
+### 安装
 
 **社区插件市场**：设置 → 第三方插件 → 浏览 → 搜索 **AI Vault Agent CN** → 安装并启用。
 
@@ -113,19 +289,19 @@ CN AI Agent/记忆.md
 
 **系统要求**：Obsidian 1.7.2 及以上；桌面端与移动端均可（本地代理仅桌面端）。
 
-## 使用
+### 使用
 
 1. 设置 → AI Vault Agent CN → 在「智能体 (Agents)」里新建或选择一个 Agent → 选择服务商 → 粘贴 API Key → 选择模型。
 2. 点击左侧 ribbon 图标（或命令面板「打开智能体 / open agent」）打开侧栏对话。
 3. 例如：「找出最近关于 X 的笔记整理成一篇 MOC」「把当前笔记的结尾改成总结段落」。
 4. 点击标题栏的**切换智能体**图标换用另一个 Agent（对话不变）；点击**历史记录**图标搜索过往会话，点任意一条即载回对话并继续。
 
-## 本地代理
+### 本地代理
 
 设置 → AI Vault Agent CN → **本地代理（可选）** 填 `host:port`（如 `http://127.0.0.1:9000`；需认证时写 `user:pass@host:port`），
 AI 请求即经该代理转发，便于抓包排查或在受限网络下中转；留空直连。仅桌面端生效，不支持 SOCKS。
 
-## 联网搜索
+### 联网搜索
 
 模型训练数据有截止日期，库内笔记也未必覆盖最新信息。设置 → AI Vault Agent CN → **联网搜索** 有四档：
 
@@ -141,7 +317,7 @@ AI 请求即经该代理转发，便于抓包排查或在受限网络下中转�
 - 可调「每次搜索返回条数」与「搜索深度」（basic 1 credit / advanced 2 credits）。
 - 若服务商拒绝了联网参数，本轮会自动去掉该参数重试一次，不会因此整轮失败。
 
-## 会话历史
+### 会话历史
 
 聊天过程中，插件把每条事件（用户消息、助手回答、思考、工具调用与结果）追加写入
 `.obsidian/plugins/vault-agent/history.jsonl`。`data.json` 里只留最近 40 条用于恢复界面，
@@ -163,13 +339,13 @@ python tools/history_db.py stats
 数据库默认落在 JSONL 同目录（`history.db`）；导入按事件 id 去重，重复运行只写入新增事件。
 路径可用 `--vault <vault 根目录>` 或 `--jsonl/--db` 指定。
 
-## 安全
+### 安全
 
 - API Key 只存本机 Obsidian 配置（`data.json`），不上传。
 - 智能体没有删除、移动文件与执行命令的工具；写操作默认需确认。
 - 长笔记读取与工具结果均自动截断，控制 token 成本。
 
-## 开发
+### 开发
 
 ```bash
 npm install
@@ -177,13 +353,13 @@ npm run build   # tsc 检查 + esbuild 产出 main.js
 npm test        # node 端到端单测（mock SSE 服务 + 工具循环 + 历史记录器）
 ```
 
-## 问题反馈
-
-- GitHub Issues：<https://github.com/yanqingwang/opensource-AI-vault-agent/issues>
-- 邮箱：289631530@qq.com
-
-反馈时请尽量附上：Obsidian 版本、插件版本、问题描述或截图、预期结果。
-
-## 许可证
+### 许可证
 
 MIT
+
+### 问题与反馈
+
+- GitHub Issues：<https://github.com/yanqingwang/opensource-AI-vault-agent/issues>
+- 邮箱：wangyantsing@qq.com
+
+反馈时请尽量附上：Obsidian 版本、插件版本、问题描述或截图、预期结果。

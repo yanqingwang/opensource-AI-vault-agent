@@ -1,10 +1,11 @@
-import { ItemView, WorkspaceLeaf, MarkdownRenderer, Notice, setIcon } from 'obsidian';
+import { ItemView, WorkspaceLeaf, MarkdownRenderer, Notice, TFile, setIcon } from 'obsidian';
 import { ChatMessage, ToolCall, runAgentLoop, ToolDef, ToolExecutor, normalizeReasoning } from './agent';
 import { runAnthropicLoop } from './anthropic';
 import { FetchLike, makeProxyFetch } from './proxyFetch';
 import { parseHistory, sessionCursor, sessionTranscript, summarizeSessions, type HistoryEvent } from './history';
 import { buildWebSearchToolDef, createWebSearchExecutor, resolveSearch, withTimeout, WEB_SEARCH_TOOL_NAME, type SearchPost, type SearchSettings } from './search';
 import { t, tf } from './i18n';
+import { MEMORY_FOLDER } from './memory';
 import { addCopyButton } from './clipboard';
 import { VaultToolExecutor, buildToolDefs } from './tools';
 import type VaultAgentPlugin from './main';
@@ -431,7 +432,22 @@ export class AgentView extends ItemView {
 		if (pre) pre.textContent = result.content.slice(0, 2000);
 	}
 
-	private buildSystemPrompt(): string {
+	/**
+	 * Long-lived rules the user keeps next to the agent's memory. Read on every
+	 * turn so editing `CN AI Agent/AGENTS.md` changes the next reply immediately;
+	 * the file is tiny, so there is no cache to invalidate.
+	 */
+	private async readAgentRules(): Promise<string> {
+		const file = this.app.vault.getAbstractFileByPath(`${MEMORY_FOLDER}/AGENTS.md`);
+		if (!(file instanceof TFile)) return '';
+		try {
+			return (await this.app.vault.read(file)).trim();
+		} catch {
+			return '';
+		}
+	}
+
+	private async buildSystemPrompt(): Promise<string> {
 		const s = this.plugin.profile;
 		const active = this.app.workspace.getActiveFile();
 		const zhMode = this.plugin.lang === 'zh';
@@ -448,6 +464,7 @@ export class AgentView extends ItemView {
 - All paths are vault-relative. New notes are Markdown with sensible headings and [[wikilinks]].
 - Reply in the user's language; summarize tool output instead of pasting it raw.`
 		);
+		const rules = await this.readAgentRules();
 		const ctx: string[] = [];
 		ctx.push(zhMode ? `库名：${this.app.vault.getName()}` : `Vault: ${this.app.vault.getName()}`);
 		ctx.push(zhMode ? `今天日期：${new Date().toISOString().slice(0, 10)}` : `Today: ${new Date().toISOString().slice(0, 10)}`);
@@ -466,7 +483,12 @@ export class AgentView extends ItemView {
 				? '联网搜索：当前服务商已内置联网，可以直接回答需要实时信息的问题。'
 				: 'Web search: native search is enabled for this provider, so you can answer live questions directly.');
 		}
-		return base + '\n\n' + ctx.join('\n');
+		const rulesBlock = rules
+			? (zhMode
+				? `\n\n## 必须遵守的长期约束（来自 ${MEMORY_FOLDER}/AGENTS.md）\n以下规则是用户为本智能体设定的长期要求，必须在思考和行动中遵守；与上面的默认规则冲突时，以本段为准。\n\n${rules}`
+				: `\n\n## Standing instructions (from ${MEMORY_FOLDER}/AGENTS.md)\nThese rules are the user's long-lived requirements for this agent. Follow them in thinking and action; if they conflict with the defaults above, this section wins.\n\n${rules}`)
+			: '';
+		return base + rulesBlock + '\n\n' + ctx.join('\n');
 	}
 
 	/** Current web-search configuration, as the pure `search.ts` helpers expect it. */
@@ -526,10 +548,11 @@ export class AgentView extends ItemView {
 		this.messages.push({ role: 'user', content: input });
 		const history = this.plugin.history;
 		history.user(input);
+		const systemPrompt = await this.buildSystemPrompt();
 		if (this.messages[0]?.role !== 'system') {
-			this.messages.unshift({ role: 'system', content: this.buildSystemPrompt() });
+			this.messages.unshift({ role: 'system', content: systemPrompt });
 		} else {
-			this.messages[0].content = this.buildSystemPrompt();
+			this.messages[0].content = systemPrompt;
 		}
 
 		const stream = this.beginStreamingBubble();

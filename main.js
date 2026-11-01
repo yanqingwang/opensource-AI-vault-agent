@@ -1280,6 +1280,219 @@ function tf(lang, key, vars) {
   return t(lang, key).replace(/\{(\w+)\}/g, (m, name) => name in vars ? String(vars[name]) : m);
 }
 
+// memory.ts
+var MEMORY_FOLDER = "CN AI Agent";
+var MEMORY_FILE = `${MEMORY_FOLDER}/\u8BB0\u5FC6.md`;
+var REVIEW_LADDER_DAYS = [1, 2, 4, 7, 15, 30, 60, 120, 240];
+var DAY_MS = 864e5;
+var DECAY = -Math.log(0.9);
+function intervalDays(reviews) {
+  const ladder = REVIEW_LADDER_DAYS;
+  const index = Math.min(Math.max(Math.floor(reviews), 0), ladder.length - 1);
+  return ladder[index];
+}
+function retention(entry, now) {
+  const since = Math.max(0, now - (entry.lastReviewed || entry.updated || entry.created));
+  const stability = intervalDays(entry.reviews) * DAY_MS / DECAY;
+  return Math.exp(-since / stability);
+}
+function dueEntries(entries, now) {
+  return entries.filter((e) => (e.nextReview || 0) <= now).sort((a, b) => (a.nextReview || 0) - (b.nextReview || 0));
+}
+function markReviewed(entry, now) {
+  const reviews = Math.max(0, entry.reviews) + 1;
+  return {
+    ...entry,
+    reviews,
+    lastReviewed: now,
+    nextReview: now + intervalDays(reviews) * DAY_MS
+  };
+}
+function markForgotten(entry, now) {
+  return {
+    ...entry,
+    reviews: 0,
+    lastReviewed: now,
+    nextReview: now + intervalDays(0) * DAY_MS
+  };
+}
+function clip(text, max) {
+  const flat = text.replace(/\s+/g, " ").trim();
+  if (flat.length <= max)
+    return flat;
+  return flat.slice(0, max).trimEnd() + "\u2026";
+}
+function sessionPoints(events, limit = 12) {
+  const ordered = [...events].sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0));
+  const points = [];
+  for (const event of ordered) {
+    if (event.type === "user") {
+      const q = clip(event.content ?? "", 200);
+      if (q)
+        points.push({ q, a: "" });
+      if (points.length >= limit)
+        break;
+    } else if (event.type === "assistant") {
+      const last = points[points.length - 1];
+      if (last && !last.a)
+        last.a = clip(event.content ?? "", 400);
+    }
+  }
+  return points;
+}
+function memoryTitle(events) {
+  const first = [...events].sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0)).find((e) => e.type === "user" && e.content?.trim());
+  return clip(first?.content ?? "", 40) || "\uFF08\u65E0\u6807\u9898\u5BF9\u8BDD\uFF09";
+}
+function mergeSession(entries, events, now) {
+  if (!events.length)
+    return entries;
+  const session = events[0].session;
+  const points = sessionPoints(events);
+  if (!points.length)
+    return entries;
+  const ordered = [...events].sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0));
+  const created = ordered[0].ts || now;
+  const first = ordered[0];
+  const existing = entries.find((e) => e.session === session);
+  const refreshed = {
+    id: session,
+    session,
+    title: memoryTitle(events),
+    points,
+    turns: points.length,
+    agent: first.agent ?? "",
+    model: first.model ?? "",
+    created: existing?.created ?? created,
+    updated: now,
+    reviews: existing?.reviews ?? 0,
+    lastReviewed: existing?.lastReviewed ?? 0,
+    // A conversation that keeps going is not "recalled": only an explicit
+    // review moves the date, so new turns must not push it into the future.
+    nextReview: existing?.nextReview ?? now + intervalDays(0) * DAY_MS
+  };
+  return existing ? entries.map((e) => e.session === session ? refreshed : e) : [...entries, refreshed];
+}
+var pad = (n) => String(n).padStart(2, "0");
+function formatDay(ms) {
+  const d = new Date(ms);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+function formatStamp(ms) {
+  const d = new Date(ms);
+  return `${formatDay(ms)} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+function daysUntil(ms, now) {
+  return Math.round((ms - now) / DAY_MS);
+}
+function heading(title) {
+  return title.replace(/\r?\n/g, " ").replace(/^#+\s*/, "").trim() || "\uFF08\u65E0\u6807\u9898\u5BF9\u8BDD\uFF09";
+}
+function encodeMemoryData(entries) {
+  return ["<!-- memory:data", JSON.stringify(entries), "-->"].join("\n");
+}
+function parseMemoryFile(text) {
+  const match = /<!--\s*memory:data\s*\n([\s\S]*?)\n\s*-->/.exec(text);
+  if (!match)
+    return [];
+  try {
+    const parsed = JSON.parse(match[1]);
+    if (!Array.isArray(parsed))
+      return [];
+    const out = [];
+    for (const raw of parsed) {
+      if (raw === null || typeof raw !== "object")
+        continue;
+      const e = raw;
+      if (typeof e.session !== "string" || !e.session)
+        continue;
+      out.push({
+        id: typeof e.id === "string" ? e.id : e.session,
+        session: e.session,
+        title: typeof e.title === "string" ? e.title : "\uFF08\u65E0\u6807\u9898\u5BF9\u8BDD\uFF09",
+        points: Array.isArray(e.points) ? e.points.flatMap((p) => {
+          if (p === null || typeof p !== "object")
+            return [];
+          const pair = p;
+          if (typeof pair.q !== "string" || !pair.q)
+            return [];
+          return [{ q: pair.q, a: typeof pair.a === "string" ? pair.a : "" }];
+        }) : [],
+        turns: typeof e.turns === "number" ? e.turns : 0,
+        agent: typeof e.agent === "string" ? e.agent : "",
+        model: typeof e.model === "string" ? e.model : "",
+        created: typeof e.created === "number" ? e.created : 0,
+        updated: typeof e.updated === "number" ? e.updated : 0,
+        reviews: typeof e.reviews === "number" ? e.reviews : 0,
+        lastReviewed: typeof e.lastReviewed === "number" ? e.lastReviewed : 0,
+        nextReview: typeof e.nextReview === "number" ? e.nextReview : 0
+      });
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+function renderMemoryFile(entries, now) {
+  const due = dueEntries(entries, now);
+  const ordered = [...entries].sort((a, b) => (a.nextReview || 0) - (b.nextReview || 0));
+  const lines = [
+    "---",
+    "title: \u8BB0\u5FC6",
+    `updated: ${new Date(now).toISOString()}`,
+    `entries: ${entries.length}`,
+    `due: ${due.length}`,
+    "tags:",
+    "  - ai-memory",
+    "---",
+    "",
+    "# \u8BB0\u5FC6",
+    "",
+    "> \u7531 AI Vault Agent CN \u81EA\u52A8\u7EF4\u62A4\u3002\u6BCF\u8F6E\u5BF9\u8BDD\u66F4\u65B0\u4E00\u6B21\uFF0C\u5E76\u6309\u9057\u5FD8\u66F2\u7EBF\u5B89\u6392\u590D\u4E60\uFF1A",
+    "> \u95F4\u9694\u4F9D\u6B21\u4E3A " + REVIEW_LADDER_DAYS.join(" / ") + " \u5929\u3002\u6B63\u6587\u53EF\u4EE5\u968F\u610F\u4FEE\u6539\uFF0C",
+    "> \u672B\u5C3E `memory:data` \u6CE8\u91CA\u662F\u6392\u671F\u6570\u636E\uFF0C\u6539\u52A8\u4F1A\u4E22\u5931\u590D\u4E60\u8FDB\u5EA6\u3002",
+    ""
+  ];
+  lines.push(`## \u4ECA\u65E5\u5F85\u590D\u4E60${due.length ? `\uFF08${due.length}\uFF09` : ""}`, "");
+  if (!due.length) {
+    lines.push("\u4ECA\u5929\u6CA1\u6709\u5230\u671F\u7684\u8BB0\u5FC6\u3002", "");
+  } else {
+    for (const entry of due) {
+      const overdue = -daysUntil(entry.nextReview, now);
+      const when = overdue > 0 ? `\u5DF2\u8FC7\u671F ${overdue} \u5929` : "\u4ECA\u5929\u5230\u671F";
+      lines.push(`- [[#${heading(entry.title)}]] \xB7 ${when} \xB7 \u590D\u4E60 ${entry.reviews} \u6B21`);
+    }
+    lines.push("");
+  }
+  lines.push("## \u5168\u90E8\u8BB0\u5FC6", "");
+  if (!ordered.length) {
+    lines.push("\u8FD8\u6CA1\u6709\u8BB0\u5FC6\u3002\u53D1\u8D77\u4E00\u6B21\u5BF9\u8BDD\u540E\uFF0C\u8FD9\u91CC\u4F1A\u81EA\u52A8\u51FA\u73B0\u7B2C\u4E00\u6761\u3002", "");
+  }
+  for (const entry of ordered) {
+    const strength = Math.round(retention(entry, now) * 100);
+    const next = daysUntil(entry.nextReview, now);
+    const nextText = next > 0 ? `${next} \u5929\u540E` : next === 0 ? "\u4ECA\u5929" : `\u5DF2\u8FC7\u671F ${-next} \u5929`;
+    lines.push(`### ${heading(entry.title)}`, "");
+    lines.push(
+      `- \u4F1A\u8BDD \`${entry.session}\` \xB7 ${entry.turns} \u8F6E` + (entry.agent ? ` \xB7 ${entry.agent}` : "") + (entry.model ? ` \xB7 ${entry.model}` : "")
+    );
+    lines.push(
+      `- \u521B\u5EFA ${formatStamp(entry.created)} \xB7 \u4E0B\u6B21\u590D\u4E60 ${nextText}\uFF08${formatDay(entry.nextReview)}\uFF09\xB7 \u590D\u4E60 ${entry.reviews} \u6B21 \xB7 \u8BB0\u5FC6\u5F3A\u5EA6 ${strength}%`
+    );
+    if (entry.points.length) {
+      lines.push("- \u8981\u70B9\uFF1A");
+      for (const point of entry.points) {
+        lines.push(`    - **\u95EE**\uFF1A${point.q}`);
+        if (point.a)
+          lines.push(`      **\u7B54**\uFF1A${point.a}`);
+      }
+    }
+    lines.push("");
+  }
+  lines.push(encodeMemoryData(entries), "");
+  return lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
+}
+
 // clipboard.ts
 var import_obsidian = require("obsidian");
 async function copyText(text) {
@@ -1836,7 +2049,7 @@ var AgentView = class extends import_obsidian3.ItemView {
     for (const session of sessions) {
       const row = list.createDiv({ cls: "va-history-item" });
       const meta = row.createDiv({ cls: "va-history-meta" });
-      meta.createSpan({ cls: "va-history-time", text: formatStamp(session.lastIso) });
+      meta.createSpan({ cls: "va-history-time", text: formatStamp2(session.lastIso) });
       meta.createSpan({ cls: "va-history-count", text: `${session.events} ${this.st("historyEvents")}` });
       row.createDiv({ cls: "va-history-first", text: session.firstUser || this.st("historyNoUser") });
       if (session.hit)
@@ -2017,7 +2230,22 @@ var AgentView = class extends import_obsidian3.ItemView {
     if (pre)
       pre.textContent = result.content.slice(0, 2e3);
   }
-  buildSystemPrompt() {
+  /**
+   * Long-lived rules the user keeps next to the agent's memory. Read on every
+   * turn so editing `CN AI Agent/AGENTS.md` changes the next reply immediately;
+   * the file is tiny, so there is no cache to invalidate.
+   */
+  async readAgentRules() {
+    const file = this.app.vault.getAbstractFileByPath(`${MEMORY_FOLDER}/AGENTS.md`);
+    if (!(file instanceof import_obsidian3.TFile))
+      return "";
+    try {
+      return (await this.app.vault.read(file)).trim();
+    } catch {
+      return "";
+    }
+  }
+  async buildSystemPrompt() {
     const s = this.plugin.profile;
     const active = this.app.workspace.getActiveFile();
     const zhMode = this.plugin.lang === "zh";
@@ -2030,6 +2258,7 @@ var AgentView = class extends import_obsidian3.ItemView {
 - Use edit_note with an exact, unique old_string; create_note for new files; append_note to add text.
 - All paths are vault-relative. New notes are Markdown with sensible headings and [[wikilinks]].
 - Reply in the user's language; summarize tool output instead of pasting it raw.`);
+    const rules = await this.readAgentRules();
     const ctx = [];
     ctx.push(zhMode ? `\u5E93\u540D\uFF1A${this.app.vault.getName()}` : `Vault: ${this.app.vault.getName()}`);
     ctx.push(zhMode ? `\u4ECA\u5929\u65E5\u671F\uFF1A${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}` : `Today: ${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}`);
@@ -2042,7 +2271,18 @@ var AgentView = class extends import_obsidian3.ItemView {
     } else if (search.native) {
       ctx.push(zhMode ? "\u8054\u7F51\u641C\u7D22\uFF1A\u5F53\u524D\u670D\u52A1\u5546\u5DF2\u5185\u7F6E\u8054\u7F51\uFF0C\u53EF\u4EE5\u76F4\u63A5\u56DE\u7B54\u9700\u8981\u5B9E\u65F6\u4FE1\u606F\u7684\u95EE\u9898\u3002" : "Web search: native search is enabled for this provider, so you can answer live questions directly.");
     }
-    return base + "\n\n" + ctx.join("\n");
+    const rulesBlock = rules ? zhMode ? `
+
+## \u5FC5\u987B\u9075\u5B88\u7684\u957F\u671F\u7EA6\u675F\uFF08\u6765\u81EA ${MEMORY_FOLDER}/AGENTS.md\uFF09
+\u4EE5\u4E0B\u89C4\u5219\u662F\u7528\u6237\u4E3A\u672C\u667A\u80FD\u4F53\u8BBE\u5B9A\u7684\u957F\u671F\u8981\u6C42\uFF0C\u5FC5\u987B\u5728\u601D\u8003\u548C\u884C\u52A8\u4E2D\u9075\u5B88\uFF1B\u4E0E\u4E0A\u9762\u7684\u9ED8\u8BA4\u89C4\u5219\u51B2\u7A81\u65F6\uFF0C\u4EE5\u672C\u6BB5\u4E3A\u51C6\u3002
+
+${rules}` : `
+
+## Standing instructions (from ${MEMORY_FOLDER}/AGENTS.md)
+These rules are the user's long-lived requirements for this agent. Follow them in thinking and action; if they conflict with the defaults above, this section wins.
+
+${rules}` : "";
+    return base + rulesBlock + "\n\n" + ctx.join("\n");
   }
   /** Current web-search configuration, as the pure `search.ts` helpers expect it. */
   searchSettings() {
@@ -2099,10 +2339,11 @@ var AgentView = class extends import_obsidian3.ItemView {
     this.messages.push({ role: "user", content: input });
     const history = this.plugin.history;
     history.user(input);
+    const systemPrompt = await this.buildSystemPrompt();
     if (this.messages[0]?.role !== "system") {
-      this.messages.unshift({ role: "system", content: this.buildSystemPrompt() });
+      this.messages.unshift({ role: "system", content: systemPrompt });
     } else {
-      this.messages[0].content = this.buildSystemPrompt();
+      this.messages[0].content = systemPrompt;
     }
     const stream = this.beginStreamingBubble();
     const proxy = s.proxyUrl.trim();
@@ -2199,225 +2440,12 @@ var AgentView = class extends import_obsidian3.ItemView {
     }
   }
 };
-function formatStamp(iso) {
+function formatStamp2(iso) {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime()))
     return "";
   const pad2 = (n) => String(n).padStart(2, "0");
   return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())} ${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
-}
-
-// memory.ts
-var MEMORY_FOLDER = "CN AI Agent";
-var MEMORY_FILE = `${MEMORY_FOLDER}/\u8BB0\u5FC6.md`;
-var REVIEW_LADDER_DAYS = [1, 2, 4, 7, 15, 30, 60, 120, 240];
-var DAY_MS = 864e5;
-var DECAY = -Math.log(0.9);
-function intervalDays(reviews) {
-  const ladder = REVIEW_LADDER_DAYS;
-  const index = Math.min(Math.max(Math.floor(reviews), 0), ladder.length - 1);
-  return ladder[index];
-}
-function retention(entry, now) {
-  const since = Math.max(0, now - (entry.lastReviewed || entry.updated || entry.created));
-  const stability = intervalDays(entry.reviews) * DAY_MS / DECAY;
-  return Math.exp(-since / stability);
-}
-function dueEntries(entries, now) {
-  return entries.filter((e) => (e.nextReview || 0) <= now).sort((a, b) => (a.nextReview || 0) - (b.nextReview || 0));
-}
-function markReviewed(entry, now) {
-  const reviews = Math.max(0, entry.reviews) + 1;
-  return {
-    ...entry,
-    reviews,
-    lastReviewed: now,
-    nextReview: now + intervalDays(reviews) * DAY_MS
-  };
-}
-function markForgotten(entry, now) {
-  return {
-    ...entry,
-    reviews: 0,
-    lastReviewed: now,
-    nextReview: now + intervalDays(0) * DAY_MS
-  };
-}
-function clip(text, max) {
-  const flat = text.replace(/\s+/g, " ").trim();
-  if (flat.length <= max)
-    return flat;
-  return flat.slice(0, max).trimEnd() + "\u2026";
-}
-function sessionPoints(events, limit = 12) {
-  const ordered = [...events].sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0));
-  const points = [];
-  for (const event of ordered) {
-    if (event.type === "user") {
-      const q = clip(event.content ?? "", 200);
-      if (q)
-        points.push({ q, a: "" });
-      if (points.length >= limit)
-        break;
-    } else if (event.type === "assistant") {
-      const last = points[points.length - 1];
-      if (last && !last.a)
-        last.a = clip(event.content ?? "", 400);
-    }
-  }
-  return points;
-}
-function memoryTitle(events) {
-  const first = [...events].sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0)).find((e) => e.type === "user" && e.content?.trim());
-  return clip(first?.content ?? "", 40) || "\uFF08\u65E0\u6807\u9898\u5BF9\u8BDD\uFF09";
-}
-function mergeSession(entries, events, now) {
-  if (!events.length)
-    return entries;
-  const session = events[0].session;
-  const points = sessionPoints(events);
-  if (!points.length)
-    return entries;
-  const ordered = [...events].sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0));
-  const created = ordered[0].ts || now;
-  const first = ordered[0];
-  const existing = entries.find((e) => e.session === session);
-  const refreshed = {
-    id: session,
-    session,
-    title: memoryTitle(events),
-    points,
-    turns: points.length,
-    agent: first.agent ?? "",
-    model: first.model ?? "",
-    created: existing?.created ?? created,
-    updated: now,
-    reviews: existing?.reviews ?? 0,
-    lastReviewed: existing?.lastReviewed ?? 0,
-    // A conversation that keeps going is not "recalled": only an explicit
-    // review moves the date, so new turns must not push it into the future.
-    nextReview: existing?.nextReview ?? now + intervalDays(0) * DAY_MS
-  };
-  return existing ? entries.map((e) => e.session === session ? refreshed : e) : [...entries, refreshed];
-}
-var pad = (n) => String(n).padStart(2, "0");
-function formatDay(ms) {
-  const d = new Date(ms);
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
-function formatStamp2(ms) {
-  const d = new Date(ms);
-  return `${formatDay(ms)} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-function daysUntil(ms, now) {
-  return Math.round((ms - now) / DAY_MS);
-}
-function heading(title) {
-  return title.replace(/\r?\n/g, " ").replace(/^#+\s*/, "").trim() || "\uFF08\u65E0\u6807\u9898\u5BF9\u8BDD\uFF09";
-}
-function encodeMemoryData(entries) {
-  return ["<!-- memory:data", JSON.stringify(entries), "-->"].join("\n");
-}
-function parseMemoryFile(text) {
-  const match = /<!--\s*memory:data\s*\n([\s\S]*?)\n\s*-->/.exec(text);
-  if (!match)
-    return [];
-  try {
-    const parsed = JSON.parse(match[1]);
-    if (!Array.isArray(parsed))
-      return [];
-    const out = [];
-    for (const raw of parsed) {
-      if (raw === null || typeof raw !== "object")
-        continue;
-      const e = raw;
-      if (typeof e.session !== "string" || !e.session)
-        continue;
-      out.push({
-        id: typeof e.id === "string" ? e.id : e.session,
-        session: e.session,
-        title: typeof e.title === "string" ? e.title : "\uFF08\u65E0\u6807\u9898\u5BF9\u8BDD\uFF09",
-        points: Array.isArray(e.points) ? e.points.flatMap((p) => {
-          if (p === null || typeof p !== "object")
-            return [];
-          const pair = p;
-          if (typeof pair.q !== "string" || !pair.q)
-            return [];
-          return [{ q: pair.q, a: typeof pair.a === "string" ? pair.a : "" }];
-        }) : [],
-        turns: typeof e.turns === "number" ? e.turns : 0,
-        agent: typeof e.agent === "string" ? e.agent : "",
-        model: typeof e.model === "string" ? e.model : "",
-        created: typeof e.created === "number" ? e.created : 0,
-        updated: typeof e.updated === "number" ? e.updated : 0,
-        reviews: typeof e.reviews === "number" ? e.reviews : 0,
-        lastReviewed: typeof e.lastReviewed === "number" ? e.lastReviewed : 0,
-        nextReview: typeof e.nextReview === "number" ? e.nextReview : 0
-      });
-    }
-    return out;
-  } catch {
-    return [];
-  }
-}
-function renderMemoryFile(entries, now) {
-  const due = dueEntries(entries, now);
-  const ordered = [...entries].sort((a, b) => (a.nextReview || 0) - (b.nextReview || 0));
-  const lines = [
-    "---",
-    "title: \u8BB0\u5FC6",
-    `updated: ${new Date(now).toISOString()}`,
-    `entries: ${entries.length}`,
-    `due: ${due.length}`,
-    "tags:",
-    "  - ai-memory",
-    "---",
-    "",
-    "# \u8BB0\u5FC6",
-    "",
-    "> \u7531 AI Vault Agent CN \u81EA\u52A8\u7EF4\u62A4\u3002\u6BCF\u8F6E\u5BF9\u8BDD\u66F4\u65B0\u4E00\u6B21\uFF0C\u5E76\u6309\u9057\u5FD8\u66F2\u7EBF\u5B89\u6392\u590D\u4E60\uFF1A",
-    "> \u95F4\u9694\u4F9D\u6B21\u4E3A " + REVIEW_LADDER_DAYS.join(" / ") + " \u5929\u3002\u6B63\u6587\u53EF\u4EE5\u968F\u610F\u4FEE\u6539\uFF0C",
-    "> \u672B\u5C3E `memory:data` \u6CE8\u91CA\u662F\u6392\u671F\u6570\u636E\uFF0C\u6539\u52A8\u4F1A\u4E22\u5931\u590D\u4E60\u8FDB\u5EA6\u3002",
-    ""
-  ];
-  lines.push(`## \u4ECA\u65E5\u5F85\u590D\u4E60${due.length ? `\uFF08${due.length}\uFF09` : ""}`, "");
-  if (!due.length) {
-    lines.push("\u4ECA\u5929\u6CA1\u6709\u5230\u671F\u7684\u8BB0\u5FC6\u3002", "");
-  } else {
-    for (const entry of due) {
-      const overdue = -daysUntil(entry.nextReview, now);
-      const when = overdue > 0 ? `\u5DF2\u8FC7\u671F ${overdue} \u5929` : "\u4ECA\u5929\u5230\u671F";
-      lines.push(`- [[#${heading(entry.title)}]] \xB7 ${when} \xB7 \u590D\u4E60 ${entry.reviews} \u6B21`);
-    }
-    lines.push("");
-  }
-  lines.push("## \u5168\u90E8\u8BB0\u5FC6", "");
-  if (!ordered.length) {
-    lines.push("\u8FD8\u6CA1\u6709\u8BB0\u5FC6\u3002\u53D1\u8D77\u4E00\u6B21\u5BF9\u8BDD\u540E\uFF0C\u8FD9\u91CC\u4F1A\u81EA\u52A8\u51FA\u73B0\u7B2C\u4E00\u6761\u3002", "");
-  }
-  for (const entry of ordered) {
-    const strength = Math.round(retention(entry, now) * 100);
-    const next = daysUntil(entry.nextReview, now);
-    const nextText = next > 0 ? `${next} \u5929\u540E` : next === 0 ? "\u4ECA\u5929" : `\u5DF2\u8FC7\u671F ${-next} \u5929`;
-    lines.push(`### ${heading(entry.title)}`, "");
-    lines.push(
-      `- \u4F1A\u8BDD \`${entry.session}\` \xB7 ${entry.turns} \u8F6E` + (entry.agent ? ` \xB7 ${entry.agent}` : "") + (entry.model ? ` \xB7 ${entry.model}` : "")
-    );
-    lines.push(
-      `- \u521B\u5EFA ${formatStamp2(entry.created)} \xB7 \u4E0B\u6B21\u590D\u4E60 ${nextText}\uFF08${formatDay(entry.nextReview)}\uFF09\xB7 \u590D\u4E60 ${entry.reviews} \u6B21 \xB7 \u8BB0\u5FC6\u5F3A\u5EA6 ${strength}%`
-    );
-    if (entry.points.length) {
-      lines.push("- \u8981\u70B9\uFF1A");
-      for (const point of entry.points) {
-        lines.push(`    - **\u95EE**\uFF1A${point.q}`);
-        if (point.a)
-          lines.push(`      **\u7B54**\uFF1A${point.a}`);
-      }
-    }
-    lines.push("");
-  }
-  lines.push(encodeMemoryData(entries), "");
-  return lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
 }
 
 // magpie.ts

@@ -8,7 +8,7 @@
 
 A China-first Obsidian agent plugin that talks directly to OpenAI-compatible and Anthropic Messages LLM APIs and can autonomously **search, read, create and edit** your notes. No CLI to install, no overseas account, no environment variables to configure. Configure **multiple agents** (each with its own provider, key and prompt) and switch between them from the header.
 
-**Current version: v0.3.1**
+**Current version: v0.3.9**
 
 ### Why
 
@@ -38,6 +38,9 @@ The closest equivalent overseas ([Claudian](https://github.com/yishentu/claudian
 - **Web search (optional)**: use the provider's own search (GLM / Kimi / Qwen / OpenRouter), or the bundled `web_search` tool backed by Tavily — so providers without native search, DeepSeek included, can search too.
 - **Write confirmation**: creating or editing asks first by default; can be auto-approved in settings.
 - **Context aware**: the agent is told which note is open, so it can work on what you are editing.
+- **Standing instructions**: `CN AI Agent/AGENTS.md` is read on every turn and injected as long-lived rules above the built-in prompt — edit the file, and the next reply already follows it.
+- **Model-aware reply limit**: `max_tokens` is derived from the selected model's output ceiling automatically (Magpie reports its own; routing groups use the lowest member limit); turn the auto toggle off to set a fixed value.
+- **Visible turn status**: while the agent works, the composer shows the live phase (waiting for the model → thinking → generating → running `<tool>` → waiting for your approval), so a long turn never looks frozen.
 - **China-first**: a Chinese system prompt and UI are built in, switchable to English; you can also supply your own system prompt.
 - **History, kept and searchable**: recent messages are saved and restored after a restart; the sidebar **History** button searches past conversations and loads one back into the chat, and the full transcript is kept in `history.jsonl` (see below).
 - **Multiple agents, instant switching**: each agent keeps its own provider, base URL, API key, model, generation settings, system prompt and search config; the header switcher (or the "Switch agent" command) swaps agents on the fly, keeping the conversation.
@@ -186,7 +189,7 @@ Please include your Obsidian version, the plugin version, a description or scree
 
 中文优先的 Obsidian vault 智能体插件（插件市场名 **AI Vault Agent CN**）——直连国产大模型 API（OpenAI 兼容协议 + Anthropic Messages 协议），智能体可自主**搜索、读取、创建、修改**你的笔记。无需安装任何 CLI，无需海外账号，无需配置环境变量。可配置**多个 Agent**（各自的服务商、Key、提示词），在标题栏一键切换。
 
-**当前版本：v0.3.1**
+**当前版本：v0.3.9**
 
 ### 为什么做这个
 
@@ -216,6 +219,9 @@ Please include your Obsidian version, the plugin version, a description or scree
 - **联网搜索（可选）**：用服务商内置联网（GLM / Kimi / Qwen / OpenRouter），或用插件自带的 `web_search` 工具（Tavily）——DeepSeek 这类没有内置联网的服务商也能搜。
 - **写操作确认**：默认每次创建/修改前询问；可在设置中开启自动执行。
 - **上下文感知**：自动告知当前打开的笔记路径，方便直接整理正在编辑的内容。
+- **长期约束**：每轮读取 `CN AI Agent/AGENTS.md`，作为高于内置默认规则的长期要求注入 system prompt——改完文件，下一条回复立即遵守。
+- **单次回复上限随模型自动设置**：`max_tokens` 按当前模型的输出上限自动解析（Magpie 读网关自身数据，路由组取组内最低上限）；关闭开关后可手填固定值。
+- **运行中状态可见**：智能体工作期间，输入区旁实时显示阶段（等待模型 → 思考中 → 生成中 → 正在执行某工具 → 等待你确认），长回合不再像卡死。
 - **中文优先**：内置中文系统提示与界面，可切换英文；自定义系统提示词。
 - **会话保留与检索**：最近对话自动保存，重启后继续；侧栏「历史记录」按钮可搜索过往会话并载回继续对话，完整记录另存为 `history.jsonl`（见下）。
 - **多 Agent 与快速切换**：每个 Agent 保存自己的服务商、Base URL、API Key、模型、生成参数、系统提示词与联网配置；标题栏的切换按钮（或命令「切换智能体」）可即时换用另一个 Agent，对话上下文保持不变。
